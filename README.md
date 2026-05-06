@@ -1,114 +1,165 @@
 # custom-ime
 
-基于 RIME（鼠须管）的个性化拼音输入法，通过记录你的选词行为持续优化候选词排序。
+A personalized Pinyin input method for macOS built on [RIME](https://rime.im/), with an online-learning candidate reranker that continuously adapts to your typing habits.
 
-## 原理
+## How It Works
 
-RIME 负责拼音解析和候选词生成，自定义 Python 服务负责重排序：
+RIME handles Pinyin parsing and candidate generation. A Lua filter intercepts the candidate list and forwards it to a local Python ranking service via Unix Domain Socket. The service reorders candidates based on a learned model and returns the result — all within a few milliseconds.
 
 ```
-RIME → Lua Filter → Python Ranker → 重排后的候选词
-                         ↑
-                    记录选词行为，持续学习
+Keystrokes → RIME → Candidate List
+                          │
+                    Lua Filter (rerank_filter.lua)
+                          │  Unix Socket
+                    Python Ranker
+                          │
+                    Reranked Candidates → Display
+                          │
+                    Selection recorded → Model updated
 ```
 
-**阶段一（冷启动）**：基于词频 + 二元语法 + 时间衰减打分，立即生效。
+### Learning Phases
 
-**阶段二（500 条记录后自动切换）**：在线逻辑回归，综合上下文、位置、时段等特征增量训练。
+| Phase | Trigger | Model |
+|-------|---------|-------|
+| Phase 1 | Immediately | Unigram frequency + bigram context + recency decay |
+| Phase 2 | After 500 selections | Online logistic regression (SGDClassifier) with incremental updates |
 
-## 环境要求
+The transition between phases is automatic. Phase 2 uses richer features including candidate position, word length, and time-of-day bucket.
 
-- macOS
+## Requirements
+
+- macOS 12+
 - Python 3.9+
 - Homebrew
 
-## 安装
+## Installation
 
 ```bash
 git clone https://github.com/error-surface/custom-ime.git
 cd custom-ime
 
-# 安装 Python 依赖
+# Create virtual environment and install dependencies
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 安装鼠须管 + 链接 RIME 配置
+# Install Squirrel (RIME for macOS) and symlink config files
 ./scripts/install.sh
 ```
 
-安装完成后：
-1. 注销并重新登录（或重启）
-2. 系统设置 → 键盘 → 输入法 → 添加「鼠须管」
-3. 点击菜单栏鼠须管图标 → 重新部署
+After installation:
 
-## 启动 Ranker 服务
+1. Log out and log back in (required for Squirrel to register as an input method)
+2. Open **System Settings → Keyboard → Input Sources → +**
+3. Search for **Squirrel** and add it
+4. Click the input method icon in the menu bar and select **Squirrel**
+5. Click **Deploy** from the Squirrel menu to apply the custom config
 
-**手动启动（当前终端）：**
+## Starting the Ranking Service
+
+The Python ranking service must be running for reranking to work. If it is unavailable, the Lua filter falls back to RIME's original candidate order transparently.
+
+**Run in foreground (for testing):**
 ```bash
 ./scripts/start_ranker.sh
 ```
 
-**开机自动启动：**
+**Install as a background service (recommended):**
 ```bash
 ./scripts/start_ranker.sh install
 ```
 
-**停止自动启动：**
+This registers a launchd agent that starts automatically on login.
+
+**Uninstall the background service:**
 ```bash
 ./scripts/start_ranker.sh uninstall
 ```
 
-## 查看学习效果
+**View logs:**
+```bash
+cat /tmp/custom-ime-ranker.log
+cat /tmp/custom-ime-ranker.err
+```
+
+## Monitoring Learning Progress
 
 ```bash
 source .venv/bin/activate
 python -m ranker.metrics
 ```
 
-输出示例：
+Example output:
 ```
 Total selections: 1284
 Top-1 hit rate:   73.4%
 Avg position:     0.41
 ```
 
-## 项目结构
+- **Top-1 hit rate** — percentage of times you selected the first candidate (higher is better)
+- **Avg position** — average position of your chosen candidate in the list (lower is better)
+
+## Project Structure
 
 ```
 custom-ime/
 ├── ranker/
-│   ├── config.py       # 路径、超参数配置
-│   ├── db.py           # SQLite 选词日志与词频表
-│   ├── model.py        # 阶段一频率模型 + 阶段二 SGD 模型
-│   ├── server.py       # Unix Socket 服务（rank / select）
-│   └── metrics.py      # Top-1 命中率统计
+│   ├── config.py           # Paths, hyperparameters, phase threshold
+│   ├── db.py               # SQLite layer: selection log, unigram/bigram tables
+│   ├── model.py            # Phase 1 frequency model + Phase 2 SGDClassifier
+│   ├── server.py           # Unix socket server handling rank/select actions
+│   └── metrics.py          # Top-1 hit rate and average position reporting
 ├── rime/
-│   ├── default.custom.yaml
-│   ├── luna_pinyin.custom.yaml
+│   ├── default.custom.yaml         # RIME schema list override
+│   ├── luna_pinyin.custom.yaml     # Wires up Lua filter and notifier
 │   └── lua/
-│       ├── rerank_filter.lua    # 调用 Python 服务重排候选词
-│       └── select_notifier.lua  # 记录用户选词行为
+│       ├── rerank_filter.lua       # Sends candidates to Python, returns reranked list
+│       └── select_notifier.lua     # Records confirmed word selections
 ├── scripts/
-│   ├── install.sh               # 安装鼠须管 + 链接配置
-│   ├── start_ranker.sh          # 启动 / 安装 / 卸载服务
-│   └── com.custom-ime.ranker.plist
-└── tests/                       # 18 个单元 + 集成测试
+│   ├── install.sh                          # Installs Squirrel and symlinks RIME config
+│   ├── start_ranker.sh                     # Start / install / uninstall the service
+│   └── com.custom-ime.ranker.plist         # launchd agent definition
+├── tests/
+│   ├── test_db.py          # Database layer unit tests
+│   ├── test_model.py       # Ranking model unit tests (Phase 1 + Phase 2)
+│   ├── test_server.py      # Socket server unit tests
+│   └── test_integration.py # End-to-end learning cycle test
+├── requirements.txt
+└── pyproject.toml
 ```
 
-## 运行测试
+## Data Storage
+
+All runtime data is stored in `~/.local/share/custom-ime/`:
+
+| File | Contents |
+|------|----------|
+| `selections.db` | Selection log, unigram and bigram frequency tables |
+| `sgd_model.pkl` | Serialized Phase 2 model weights |
+| `ranker.sock` | Unix Domain Socket (runtime only) |
+
+## Running Tests
 
 ```bash
 source .venv/bin/activate
 pytest -v
 ```
 
-## 数据存储位置
+All 18 tests should pass (unit tests for db, model, server, and an end-to-end integration test).
 
-所有数据存储在 `~/.local/share/custom-ime/`：
+## Configuration
 
-| 文件 | 内容 |
-|------|------|
-| `selections.db` | 选词日志、词频表 |
-| `sgd_model.pkl` | 阶段二模型权重 |
-| `ranker.sock` | Unix Socket |
+Edit `ranker/config.py` to tune the model behavior:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ALPHA` | `0.4` | Weight for unigram frequency |
+| `BETA` | `0.4` | Weight for bigram context |
+| `GAMMA` | `0.2` | Weight for recency |
+| `DECAY` | `0.95` | Recency decay factor per day |
+| `PHASE2_THRESHOLD` | `500` | Number of selections before switching to Phase 2 |
+
+## License
+
+[MIT](LICENSE)
