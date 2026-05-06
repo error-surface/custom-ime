@@ -1,0 +1,92 @@
+import json
+import sqlite3
+import time
+from pathlib import Path
+
+
+class SelectionDB:
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._create_tables()
+
+    def _create_tables(self):
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS selections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pinyin TEXT NOT NULL,
+                context TEXT NOT NULL DEFAULT '',
+                chosen TEXT NOT NULL,
+                candidates TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                timestamp REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS unigram_freq (
+                word TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0,
+                last_used REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS bigram_freq (
+                prev_word TEXT NOT NULL,
+                curr_word TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (prev_word, curr_word)
+            );
+        """)
+        self._conn.commit()
+
+    def record_selection(self, pinyin: str, context: str, chosen: str,
+                         candidates: list, position: int):
+        now = time.time()
+        self._conn.execute(
+            "INSERT INTO selections (pinyin, context, chosen, candidates, position, timestamp) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (pinyin, context, chosen, json.dumps(candidates, ensure_ascii=False), position, now),
+        )
+        self._conn.execute(
+            "INSERT INTO unigram_freq (word, count, last_used) VALUES (?, 1, ?) "
+            "ON CONFLICT(word) DO UPDATE SET count = count + 1, last_used = ?",
+            (chosen, now, now),
+        )
+        if context:
+            self._conn.execute(
+                "INSERT INTO bigram_freq (prev_word, curr_word, count) VALUES (?, ?, 1) "
+                "ON CONFLICT(prev_word, curr_word) DO UPDATE SET count = count + 1",
+                (context, chosen),
+            )
+        self._conn.commit()
+
+    def get_selection_count(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM selections").fetchone()
+        return row[0]
+
+    def get_unigram_freq(self, word: str) -> int:
+        row = self._conn.execute(
+            "SELECT count FROM unigram_freq WHERE word = ?", (word,)
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_bigram_freq(self, prev_word: str, curr_word: str) -> int:
+        row = self._conn.execute(
+            "SELECT count FROM bigram_freq WHERE prev_word = ? AND curr_word = ?",
+            (prev_word, curr_word),
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_last_used(self, word: str):
+        row = self._conn.execute(
+            "SELECT last_used FROM unigram_freq WHERE word = ?", (word,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def get_all_selections(self) -> list:
+        rows = self._conn.execute(
+            "SELECT pinyin, context, chosen, candidates, position, timestamp "
+            "FROM selections ORDER BY id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def close(self):
+        self._conn.close()

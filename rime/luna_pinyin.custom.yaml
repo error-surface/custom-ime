@@ -1,0 +1,6 @@
+patch:
+  engine/filters:
+    - simplifier
+    - uniquifier
+    - lua_filter@*rerank_filter
+  engine/processors/@before 0: lua_processor@*select_notifier
