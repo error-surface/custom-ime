@@ -68,3 +68,16 @@ def test_invalid_action(server):
     _, sock_path = server
     resp = _send(sock_path, {"action": "invalid"})
     assert "error" in resp
+
+
+def test_special_char_candidates(server):
+    _, sock_path = server
+    cands = ['a"b', r"a\\b", "line\nbreak", "tab\tchar"]
+    resp = _send(sock_path, {"action": "rank", "pinyin": "x", "context": "", "candidates": cands})
+    assert set(resp["ranked"]) == set(cands)
+
+    resp = _send(
+        sock_path,
+        {"action": "select", "pinyin": "x", "context": "", "chosen": 'a"b', "candidates": cands, "position": 0},
+    )
+    assert resp["status"] == "ok"
