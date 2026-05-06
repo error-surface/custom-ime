@@ -1,4 +1,5 @@
 patch:
+  switches/@0/reset: 0
   engine/filters:
     - simplifier
     - uniquifier
