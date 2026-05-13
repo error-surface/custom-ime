@@ -1,14 +1,18 @@
 import json
 import socket
 import threading
+import time
 from pathlib import Path
 
 from ranker.config import SOCKET_PATH, DB_PATH, MODEL_PATH
 from ranker.db import SelectionDB
 from ranker.model import RankingModel
+from ranker.sync_phrases import sync_full, sync_incremental
 
 
 class RankerServer:
+    SYNC_INTERVAL = 1800  # full sync every 30 minutes
+
     def __init__(self, socket_path: Path = SOCKET_PATH,
                  db_path: Path = DB_PATH, model_path: Path = MODEL_PATH):
         self._socket_path = socket_path
@@ -17,6 +21,21 @@ class RankerServer:
         self._model.load_phase2()
         self._server_socket = None
         self._running = False
+
+    def _start_sync_thread(self):
+        """Background thread: periodic full sync to custom_phrase.txt."""
+        def _sync_loop():
+            while self._running:
+                try:
+                    count = sync_full()
+                    if count:
+                        print(f"[sync] full sync: {count} phrases")
+                except Exception as e:
+                    print(f"[sync] error: {e}")
+                time.sleep(self.SYNC_INTERVAL)
+
+        t = threading.Thread(target=_sync_loop, daemon=True)
+        t.start()
 
     def serve(self):
         self._socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,6 +47,14 @@ class RankerServer:
         self._server_socket.listen(5)
         self._server_socket.settimeout(0.5)
         self._running = True
+
+        # Initial full sync + start periodic sync thread
+        try:
+            count = sync_full()
+            print(f"[sync] initial sync: {count} phrases")
+        except Exception as e:
+            print(f"[sync] initial sync error: {e}")
+        self._start_sync_thread()
 
         while self._running:
             try:
@@ -76,6 +103,11 @@ class RankerServer:
             )
             if self._model.current_phase() == 1:
                 self._model.maybe_train_phase2()
+            # Incremental sync: immediately persist to custom_phrase.txt
+            try:
+                sync_incremental(request["chosen"], request["pinyin"])
+            except Exception as e:
+                print(f"[sync] incremental error: {e}")
             return {"status": "ok"}
         else:
             return {"error": f"unknown action: {action}"}
