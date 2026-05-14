@@ -22,10 +22,10 @@ Keystrokes → RIME → Candidate List
 
 | Phase | Trigger | Model |
 |-------|---------|-------|
-| Phase 1 | Immediately | Unigram frequency + bigram context + recency decay |
-| Phase 2 | After 500 selections | Online logistic regression (SGDClassifier) with incremental updates |
+| Phase 1 | Immediately | Unigram frequency + bigram context + recency decay + length bonus − skip penalty |
+| Phase 2 | After 30 selections | FTRL-Proximal online logistic regression, learns residual corrections on top of Phase 1 |
 
-The transition between phases is automatic. Phase 2 uses richer features including candidate position, word length, and time-of-day bucket.
+Both phases always contribute — Phase 2 blends in as a modest adjustment rather than replacing Phase 1. Phase 2 features include candidate position, word length, time-of-day bucket, and the Phase 1 score itself (so FTRL learns where the heuristics are wrong).
 
 ## Requirements
 
@@ -105,10 +105,13 @@ Avg position:     0.41
 ```
 custom-ime/
 ├── ranker/
-│   ├── config.py           # Paths, hyperparameters, phase threshold
+│   ├── config.py           # Paths, hyperparameters
 │   ├── db.py               # SQLite layer: selection log, unigram/bigram tables
-│   ├── model.py            # Phase 1 frequency model + Phase 2 SGDClassifier
+│   ├── local_ranker.py     # FTRL-Proximal online learner (Phase 2)
+│   ├── model.py            # Phase 1 heuristic scoring + Phase 2 FTRL blend
+│   ├── seed_data.py        # 630-word built-in vocabulary for cold start
 │   ├── server.py           # Unix socket server handling rank/select actions
+│   ├── sync_phrases.py     # Sync learned phrases to Rime's custom_phrase.txt
 │   └── metrics.py          # Top-1 hit rate and average position reporting
 ├── rime/
 │   ├── default.custom.yaml         # RIME schema list override
@@ -119,10 +122,12 @@ custom-ime/
 ├── scripts/
 │   ├── install.sh                          # Installs Squirrel and symlinks RIME config
 │   ├── start_ranker.sh                     # Start / install / uninstall the service
+│   ├── ranker_client.py                    # Socket relay (Lua → Python), stdin+timeout
+│   ├── smoke_test.py                       # 4-check end-to-end verification
 │   └── com.custom-ime.ranker.plist         # launchd agent definition
 ├── tests/
 │   ├── test_db.py          # Database layer unit tests
-│   ├── test_model.py       # Ranking model unit tests (Phase 1 + Phase 2)
+│   ├── test_model.py       # Ranking model unit tests (Phase 1 + FTRL Phase 2)
 │   ├── test_server.py      # Socket server unit tests
 │   └── test_integration.py # End-to-end learning cycle test
 ├── requirements.txt
@@ -136,7 +141,7 @@ All runtime data is stored in `~/.local/share/custom-ime/`:
 | File | Contents |
 |------|----------|
 | `selections.db` | Selection log, unigram and bigram frequency tables |
-| `sgd_model.pkl` | Serialized Phase 2 model weights |
+| `ftrl_weights.json` | Serialized FTRL model weights (Phase 2) |
 | `ranker.sock` | Unix Domain Socket (runtime only) |
 
 ## Running Tests
@@ -157,8 +162,9 @@ Edit `ranker/config.py` to tune the model behavior:
 | `ALPHA` | `0.4` | Weight for unigram frequency |
 | `BETA` | `0.4` | Weight for bigram context |
 | `GAMMA` | `0.2` | Weight for recency |
-| `DECAY` | `0.95` | Recency decay factor per day |
-| `PHASE2_THRESHOLD` | `500` | Number of selections before switching to Phase 2 |
+| `DECAY` | `0.85` | Recency decay factor per day |
+| `SKIP_PENALTY` | `0.15` | Penalty per skip (candidates passed over) |
+| `LENGTH_BONUS` | `0.15` | Quadratic bonus for multi-character words |
 
 ## Smoke Test
 
