@@ -40,13 +40,10 @@ class RankingModel:
         if last_used is not None:
             days_ago = (time.time() - last_used) / 86400
             recency = math.pow(DECAY, days_ago)
-        # Log scaling: first selection has more impact; diminishing returns after.
-        unigram_score = math.log(1 + unigram)
-        bigram_score = math.log(1 + bigram)
         # Normalize skip penalty by selection count: a frequently-chosen word
         # overcomes early skips; a never-chosen word keeps the full penalty.
         skip_penalty = SKIP_PENALTY * skip_count / (1 + unigram)
-        return ALPHA * unigram_score + BETA * bigram_score + GAMMA * recency - skip_penalty
+        return ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty
 
     def _extract_features(self, word: str, context: str, position: int,
                           n_candidates: int) -> list:
