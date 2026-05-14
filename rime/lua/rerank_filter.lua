@@ -1,3 +1,6 @@
+local project_dir = os.getenv("HOME") .. "/custom-ime"
+local python = project_dir .. "/.venv/bin/python"
+local helper = project_dir .. "/scripts/ranker_client.py"
 local socket_path = os.getenv("HOME") .. "/.local/share/custom-ime/ranker.sock"
 
 local function json_escape(s)
@@ -10,7 +13,6 @@ local function json_escape(s)
     s = s:gsub("\r", "\\r")
     s = s:gsub("\n", "\\n")
     s = s:gsub("\t", "\\t")
-    -- Escape other ASCII control chars.
     s = s:gsub("[%z\1-\31]", function(c)
         return string.format("\\u%04x", c:byte())
     end)
@@ -18,19 +20,23 @@ local function json_escape(s)
 end
 
 local function send_request(request_json)
-    local sock = io.popen(
-        string.format(
-            "echo '%s' | nc -U '%s' -w 1 2>/dev/null",
-            request_json:gsub("'", "'\\''"),
-            socket_path
-        ),
-        "r"
-    )
+    local tmp = os.tmpname()
+    local f = io.open(tmp, "w")
+    if not f then
+        return nil
+    end
+    f:write(request_json)
+    f:close()
+
+    local cmd = string.format("'%s' '%s' '%s' < '%s' 2>/dev/null", python, helper, socket_path, tmp)
+    local sock = io.popen(cmd, "r")
     if not sock then
+        os.remove(tmp)
         return nil
     end
     local response = sock:read("*a")
     sock:close()
+    os.remove(tmp)
     if response and #response > 0 then
         return response
     end
@@ -50,15 +56,12 @@ local function json_decode_ranked(response_str)
         return nil
     end
 
-    -- Extract the JSON array under the "ranked" key.
     local array_part = response_str:match('"ranked"%s*:%s*(%b[])')
     if not array_part then
         return nil
     end
 
     local ranked = {}
-
-    -- Parse a JSON array of strings with minimal escape support.
     local i = 1
     local n = #array_part
     while i <= n do
@@ -88,8 +91,6 @@ local function json_decode_ranked(response_str)
                     elseif nxt == "u" then
                         local hex = array_part:sub(i + 2, i + 5)
                         if hex:match("^[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]$") then
-                            -- Keep unicode escapes as-is; candidates are expected to be UTF-8 already.
-                            -- This is mostly to avoid breaking the parser.
                             i = i + 6
                         else
                             i = i + 2
@@ -131,9 +132,7 @@ local function rerank_filter(input, env)
         json_escape(pinyin), json_escape(context), cand_json
     )
 
-    -- Default: preserve original order if the ranker is unavailable.
     local final_order = candidates
-
     local response = send_request(request)
     if response then
         local ranked = json_decode_ranked(response)
@@ -155,7 +154,6 @@ local function rerank_filter(input, env)
         end
     end
 
-    -- Persist last candidate order for selection logging.
     if ctx.set_property then
         ctx:set_property("custom_ime.last_pinyin", pinyin)
         ctx:set_property("custom_ime.last_context", context)

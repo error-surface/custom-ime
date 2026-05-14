@@ -160,6 +160,79 @@ Edit `ranker/config.py` to tune the model behavior:
 | `DECAY` | `0.95` | Recency decay factor per day |
 | `PHASE2_THRESHOLD` | `500` | Number of selections before switching to Phase 2 |
 
+## Smoke Test
+
+Verify the full pipeline (socket, ranker, learning) with a single command:
+
+```bash
+python3 scripts/smoke_test.py
+```
+
+Expect `All 4 checks passed.` — if any fail, see the Troubleshooting section below.
+
+## Troubleshooting
+
+**Check if the ranker is running:**
+
+```bash
+launchctl print gui/$(id -u)/com.custom-ime.ranker | head -5
+```
+
+Look for `state = running`. If not running, start it:
+
+```bash
+cd ~/custom-ime && ./scripts/start_ranker.sh start &
+```
+
+Or reinstall the LaunchAgent:
+
+```bash
+cd ~/custom-ime && ./scripts/start_ranker.sh install
+```
+
+**View ranker logs:**
+
+```bash
+cat /tmp/custom-ime-ranker.log
+cat /tmp/custom-ime-ranker.err
+```
+
+**Check learning progress:**
+
+```bash
+cd ~/custom-ime && source .venv/bin/activate && python -m ranker.metrics
+```
+
+**Redeploy RIME config after editing Lua or YAML files:**
+
+```bash
+/Library/Input\ Methods/Squirrel.app/Contents/MacOS/Squirrel --deploy
+```
+
+**Restart Squirrel if input switching gets stuck:**
+
+```bash
+killall Squirrel 2>/dev/null
+open /Library/Input\ Methods/Squirrel.app
+```
+
+**Verify the socket exists:**
+
+```bash
+ls -la ~/.local/share/custom-ime/ranker.sock
+```
+
+If the socket is missing but the ranker should be running, restart it with the `start` command above.
+
+**Common issues:**
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| Candidates not reranked | Ranker not running | `./scripts/start_ranker.sh install` |
+| Squirrel won't switch | Stale deploy process | `killall Squirrel && open /Library/Input\ Methods/Squirrel.app` |
+| Config changes ignored | Need redeploy | Run `Squirrel --deploy` |
+| Socket permission error | Stale socket file | Restart the ranker |
+
 ## License
 
 [MIT](LICENSE)

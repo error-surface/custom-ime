@@ -1,3 +1,6 @@
+local project_dir = os.getenv("HOME") .. "/custom-ime"
+local python = project_dir .. "/.venv/bin/python"
+local helper = project_dir .. "/scripts/ranker_client.py"
 local socket_path = os.getenv("HOME") .. "/.local/share/custom-ime/ranker.sock"
 
 local function json_escape(s)
@@ -20,7 +23,6 @@ local function json_decode_string_array(s)
     if not s then
         return nil
     end
-    -- Expect a JSON array like ["a","b"].
     if not s:match("^%s*%[") then
         return nil
     end
@@ -74,10 +76,19 @@ local function json_decode_string_array(s)
 end
 
 local function send_fire_and_forget(request_json)
+    -- Write request to temp file, pipe to helper via stdin redirection.
+    -- This avoids shell interpolation of JSON content entirely.
+    local tmp = os.tmpname()
+    local f = io.open(tmp, "w")
+    if not f then
+        return
+    end
+    f:write(request_json)
+    f:close()
+
     os.execute(string.format(
-        "echo '%s' | nc -U '%s' -w 1 &>/dev/null &",
-        request_json:gsub("'", "'\\''"),
-        socket_path
+        "'%s' '%s' '%s' --async < '%s' &>/dev/null &",
+        python, helper, socket_path, tmp
     ))
 end
 
