@@ -1,5 +1,10 @@
 patch:
   switches/@2/reset: 1
+  # Sentence mode: treat input as a continuous sentence, combining
+  # characters into words rather than showing single-char candidates.
+  translator/enable_sentence: true
+  translator/enable_user_dict: true
+  translator/sentence_over_completion: true
   engine/filters:
     - simplifier
     - uniquifier

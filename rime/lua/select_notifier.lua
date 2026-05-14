@@ -99,9 +99,14 @@ local function select_notifier(env)
             return
         end
 
-        local pinyin = ctx:get_property and (ctx:get_property("custom_ime.last_pinyin") or ctx.input) or (ctx.input or "")
-        local context = ctx:get_property and (ctx:get_property("custom_ime.last_context") or "") or ""
-        local candidates_json = ctx:get_property and (ctx:get_property("custom_ime.last_candidates_json") or "[]") or "[]"
+        local pinyin = ctx.input or ""
+        local context = ""
+        local candidates_json = "[]"
+        if ctx.get_property then
+            pinyin = ctx:get_property("custom_ime.last_pinyin") or ctx.input or ""
+            context = ctx:get_property("custom_ime.last_context") or ""
+            candidates_json = ctx:get_property("custom_ime.last_candidates_json") or "[]"
+        end
         local candidates = json_decode_string_array(candidates_json) or {}
 
         local pos = 0
