@@ -109,5 +109,18 @@ class SelectionDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def trim_old_selections(self, keep_days=90):
+        cutoff = time.time() - keep_days * 86400
+        self._conn.execute("DELETE FROM selections WHERE timestamp < ?", (cutoff,))
+        self._conn.commit()
+
+    def remove_noise_words(self, max_skip_ratio=5.0):
+        self._conn.execute("""
+            DELETE FROM unigram_freq
+            WHERE count = 0 AND skip_count > 0
+               OR (count > 0 AND CAST(skip_count AS REAL) / count > ?)
+        """, (max_skip_ratio,))
+        self._conn.commit()
+
     def close(self):
         self._conn.close()

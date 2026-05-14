@@ -1,6 +1,7 @@
 import pytest
 from ranker.db import SelectionDB
 from ranker.model import RankingModel
+from ranker.local_ranker import MIN_SAMPLES
 
 
 @pytest.fixture
@@ -10,7 +11,7 @@ def db(tmp_path):
 
 @pytest.fixture
 def model(db, tmp_path):
-    return RankingModel(db, model_path=tmp_path / "model.pkl")
+    return RankingModel(db, ftrl_weights_path=tmp_path / "ftrl_test.json")
 
 
 def test_rank_no_history(model):
@@ -50,36 +51,39 @@ def test_phase1_active_by_default(model):
     assert model.current_phase() == 1
 
 
-def test_phase2_activates_after_threshold(db, tmp_path):
-    model = RankingModel(db, model_path=tmp_path / "model.pkl")
-    candidates = ["好", "号", "毫"]
-    for i in range(500):
-        db.record_selection("hao", "你" if i % 2 == 0 else "我", "好", candidates, 0)
-    model.maybe_train_phase2()
+def test_ftrl_phase2_blend(db):
+    """FTRL should activate after MIN_SAMPLES selections and improve ranking."""
+    model = RankingModel(db)
+    cands = ["好", "号", "毫"]
+
+    # Feed enough selections to activate FTRL (Phase 1 handles cold start)
+    for _ in range(MIN_SAMPLES):
+        model.record("hao", "你", "好", cands, 0)
+
     assert model.current_phase() == 2
 
-
-def test_phase2_ranking(db, tmp_path):
-    model = RankingModel(db, model_path=tmp_path / "model.pkl")
-    for _ in range(300):
-        db.record_selection("hao", "你", "好", ["好", "号", "毫"], 0)
-    for _ in range(100):
-        db.record_selection("hao", "你", "好", ["毫", "好", "号"], 1)
-    for _ in range(100):
-        db.record_selection("hao", "你", "号", ["号", "好", "毫"], 0)
-    model.maybe_train_phase2()
-    ranked = model.rank("hao", "你", ["好", "号", "毫"])
+    # After training, "好" should rank first with context "你"
+    ranked = model.rank("hao", "你", cands)
     assert ranked[0] == "好"
 
 
-def test_phase2_model_persistence(db, tmp_path):
-    model_path = tmp_path / "model.pkl"
-    model = RankingModel(db, model_path=model_path)
-    candidates = ["好", "号"]
-    for _ in range(500):
-        db.record_selection("hao", "", "好", candidates, 0)
-    model.maybe_train_phase2()
-    assert model_path.exists()
-    model2 = RankingModel(db, model_path=model_path)
-    model2.load_phase2()
+def test_ftrl_persistence(db, tmp_path):
+    """FTRL weights survive a model reload."""
+    from ranker.local_ranker import FTRLRanker, FTRL_WEIGHTS_PATH
+    import os
+
+    # Use a temp path to avoid clobbering real weights
+    weights_path = tmp_path / "ftrl_test.json"
+
+    model1 = RankingModel(db)
+    model1._ftrl = FTRLRanker(weights_path=weights_path)
+    cands = ["好", "号"]
+    for _ in range(MIN_SAMPLES):
+        model1.record("hao", "", "好", cands, 0)
+
+    assert weights_path.exists()
+
+    model2 = RankingModel(db)
+    model2._ftrl = FTRLRanker(weights_path=weights_path)
+    assert model2._ftrl.ready
     assert model2.current_phase() == 2

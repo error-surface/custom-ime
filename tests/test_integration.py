@@ -12,8 +12,7 @@ from ranker.server import RankerServer
 @pytest.fixture
 def full_stack(tmp_path):
     sock_path = Path(f"/tmp/ime_int_{os.getpid()}.sock")
-    srv = RankerServer(socket_path=sock_path, db_path=tmp_path / "int.db",
-                       model_path=tmp_path / "int_model.pkl")
+    srv = RankerServer(socket_path=sock_path, db_path=tmp_path / "int.db")
     thread = threading.Thread(target=srv.serve, daemon=True)
     thread.start()
     time.sleep(0.1)

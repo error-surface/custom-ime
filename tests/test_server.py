@@ -7,9 +7,6 @@ from pathlib import Path
 
 import pytest
 from ranker.server import RankerServer
-from ranker.config import PHASE2_THRESHOLD
-
-
 _counter = 0
 
 @pytest.fixture
@@ -17,8 +14,7 @@ def server(tmp_path):
     global _counter
     _counter += 1
     sock_path = Path(f"/tmp/ime_t{os.getpid()}_{_counter}.sock")
-    srv = RankerServer(socket_path=sock_path, db_path=tmp_path / "test.db",
-                       model_path=tmp_path / "model.pkl")
+    srv = RankerServer(socket_path=sock_path, db_path=tmp_path / "test.db")
     thread = threading.Thread(target=srv.serve, daemon=True)
     thread.start()
     time.sleep(0.1)

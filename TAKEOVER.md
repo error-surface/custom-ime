@@ -17,103 +17,93 @@ Runtime integration:
 - Lua files are linked under `~/Library/Rime/lua/`
 - Runtime data lives in `~/.local/share/custom-ime/`
 
-## Current Runtime State
+## Architecture
 
-Checked on 2026-05-07:
+Two-phase ranking model in `ranker/model.py`:
 
-- LaunchAgent `com.custom-ime.ranker` is loaded and running.
-- Current ranker PID was `49735` at takeover time.
-- Socket exists at `~/.local/share/custom-ime/ranker.sock`.
-- Database exists at `~/.local/share/custom-ime/selections.db`.
-- Metrics reported:
-  - Total selections: 11
-  - Top-1 hit rate: 100.0%
-  - Average position: 0.00
+- **Phase 1 (always active)**: heuristic scoring — unigram frequency + bigram context + recency decay + quadratic length bonus − skip penalty. Handles cold start.
+- **Phase 2 (activates after 30 selections)**: FTRL-Proximal online logistic regression (`ranker/local_ranker.py`) learns residual corrections on top of Phase 1 scores. Phase 1 score is an input feature, so FTRL refines rather than replaces.
 
-Useful commands:
+Both phases always contribute; Phase 2 blends in as `p1_score + (ftrl_prob − 0.5)`.
+
+Key config in `ranker/config.py`:
+
+```
+ALPHA = 0.4      # unigram weight
+BETA = 0.4       # bigram weight
+GAMMA = 0.2      # recency weight
+DECAY = 0.85     # daily recency decay
+SKIP_PENALTY = 0.15
+LENGTH_BONUS = 0.15  # quadratic: len_bonus * (extra_chars ^ 2)
+```
+
+## Runtime Data
+
+- `~/.local/share/custom-ime/selections.db` — SQLite with selection history, unigram/bigram frequencies, skip counts
+- `~/.local/share/custom-ime/ftrl_weights.json` — FTRL weights (z, n, update count)
+- `~/Library/Rime/custom_phrase.txt` — auto-synced phrases for RIME's stabledb (no decay)
+
+## Useful Commands
 
 ```bash
-launchctl print gui/501/com.custom-ime.ranker
+# Check ranker status
+launchctl list | grep custom-ime
+
+# View logs
 cat /tmp/custom-ime-ranker.log
 cat /tmp/custom-ime-ranker.err
+
+# Run metrics
 cd ~/custom-ime && .venv/bin/python -m ranker.metrics
-```
 
-## Verified Baseline
-
-The test suite passes when run outside the restricted sandbox:
-
-```bash
+# Run tests
 cd ~/custom-ime && .venv/bin/pytest -q
+
+# Smoke test (requires running ranker)
+cd ~/custom-ime && .venv/bin/python scripts/smoke_test.py
+
+# Restart ranker after code changes
+launchctl stop com.custom-ime.ranker
+launchctl start com.custom-ime.ranker
 ```
 
-Result at takeover:
+## Seed Vocabulary
 
-```text
-18 passed in 1.88s
-```
+`ranker/seed_data.py` contains 630 common Chinese words pre-seeded into the DB on server startup. Covers high-frequency single chars, common disyllabic words, and explicit same-pinyin competition groups (e.g. 测试/侧视, 你好/泥号). Only boosts words whose count is below the seed count — user-learned data always wins.
 
-Inside a restricted sandbox, socket tests may fail with `PermissionError: [Errno 1] Operation not permitted` when binding `/tmp/*.sock`; that is an environment issue, not a project failure.
+## Background Threads
 
-## Claude Context Recovered
+The ranker server (`ranker/server.py`) runs three daemon threads:
 
-The original conversation started from the user's request:
+| Thread | Interval | Purpose |
+|--------|----------|---------|
+| Sync | 30 min | Full sync of learned phrases to `custom_phrase.txt` |
+| Janitor | 6 hours | Trim selections older than 90 days, remove noise words (skip/count ratio > 5) |
+| Vacuum | 24 hours | SQLite VACUUM (inside janitor thread) |
 
-> "我的本地输入法和我的习惯不相同 想开发一个新的输入法我自己训练 有什么建议吗"
+## Communication Protocol
 
-Design choices from that conversation:
+1. Lua `rerank_filter.lua` builds a JSON request, writes it to a temp file, and pipes it via stdin to `scripts/ranker_client.py` using `io.popen`. This avoids shell interpolation of JSON content.
+2. `ranker_client.py` reads stdin, sends the request over the Unix socket, prints the response.
+3. A SIGALRM hard timeout (3 seconds) kills the Python process if the socket call hangs; RIME falls back to original candidate order.
 
-- Use RIME/Squirrel rather than building a macOS input method from scratch.
-- Keep the personalization logic local and offline.
-- Start with simple frequency, bigram, and recency ranking.
-- Switch to an online `SGDClassifier` after 500 selections.
-- Store all learned data locally in SQLite and a local pickle model file.
-- Run the Python ranker as a LaunchAgent for background operation.
+## Test Suite
 
-Important follow-up history:
+18 tests across 4 files:
 
-- The repo was created and pushed to GitHub under `error-surface/custom-ime`.
-- README and MIT license were added.
-- Squirrel was installed.
-- The ranker was installed as a background LaunchAgent.
-- Simplified Chinese output was configured with `switches/@2/reset: 1`.
-- Stale `Squirrel --deploy` processes previously caused switching issues and were fixed by restarting Squirrel.
+| File | Tests |
+|------|-------|
+| `tests/test_db.py` | 5 — CRUD, frequencies, timestamps |
+| `tests/test_model.py` | 7 — Phase 1 ranking, FTRL blend, persistence, phases |
+| `tests/test_server.py` | 5 — rank/select dispatch, edge cases |
+| `tests/test_integration.py` | 1 — end-to-end learning cycle |
 
-Security note: an old GitHub personal access token appeared in the Claude chat log during repository creation. It should be considered compromised and revoked if it has not already been revoked.
+## Known Limitations
 
-## Known Risks
-
-1. Lua JSON construction is fragile.
-   `rime/lua/rerank_filter.lua` and `rime/lua/select_notifier.lua` build JSON with string formatting. Quotes, backslashes, newlines, or unusual candidate text can break requests.
-
-2. Selection learning is incomplete.
-   `select_notifier.lua` currently records the committed text but sends an empty candidate list and no useful context. This means the model learns basic unigram frequency, but richer ranking features and position-based training are limited.
-
-3. Context capture is weak.
-   The Python model supports bigram context, but the Lua notifier currently sends an empty context.
-
-4. Shelling through `echo | nc` is brittle and may add latency.
-   It works for a prototype, but robust production behavior may require a safer Lua socket/JSON path or a small helper command with proper escaping.
-
-5. Phase 2 is unproven in real usage.
-   Tests cover the code path, but the live database has only 11 selections, far below the 500-selection threshold.
-
-## Recommended Next Work
-
-1. Harden Lua request encoding.
-   Add a tested JSON escaping helper in Lua and cover candidate text containing quotes, backslashes, punctuation, and non-ASCII characters.
-
-2. Record full selection events.
-   Preserve the last ranked candidate list and selected position so the Python ranker can train on real candidate lists instead of empty arrays.
-
-3. Improve context tracking.
-   Track the previous committed Chinese token or phrase and send it as `context` for bigram learning.
-
-4. Add a local smoke test script.
-   Provide a command that sends rank/select requests to the Unix socket and prints a clear pass/fail result.
-
-5. Update README with troubleshooting.
-   Add concrete commands for checking LaunchAgent state, restarting Squirrel, redeploying RIME, and verifying learned selection counts.
+1. Lua JSON parser is hand-rolled. It handles escaped characters and Unicode escapes but could be replaced with a proper library if RIME's Lua environment supports one.
+2. FTRL features are sparse per-word and per-bigram — with heavy usage the weights file will grow. L1 regularization zeros out unused features, but the JSON file isn't pruned currently.
+3. Candidate list is fully determined by RIME's translators; the custom ranker only reorders. Raw pinyin appearing as a candidate is a RIME dictionary issue.
+4. No test coverage for `sync_phrases.py` or `seed_data.py`.
 
 ## Operational Commands
 
@@ -135,7 +125,7 @@ Uninstall background ranker:
 cd ~/custom-ime && ./scripts/start_ranker.sh uninstall
 ```
 
-Deploy Squirrel config:
+Deploy RIME config:
 
 ```bash
 /Library/Input\ Methods/Squirrel.app/Contents/MacOS/Squirrel --deploy

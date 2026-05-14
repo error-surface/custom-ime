@@ -4,7 +4,7 @@ import threading
 import time
 from pathlib import Path
 
-from ranker.config import SOCKET_PATH, DB_PATH, MODEL_PATH
+from ranker.config import SOCKET_PATH, DB_PATH
 from ranker.db import SelectionDB
 from ranker.model import RankingModel
 from ranker.seed_data import seed as seed_db
@@ -15,11 +15,10 @@ class RankerServer:
     SYNC_INTERVAL = 1800  # full sync every 30 minutes
 
     def __init__(self, socket_path: Path = SOCKET_PATH,
-                 db_path: Path = DB_PATH, model_path: Path = MODEL_PATH):
+                 db_path: Path = DB_PATH):
         self._socket_path = socket_path
         self._db = SelectionDB(db_path)
-        self._model = RankingModel(self._db, model_path)
-        self._model.load_phase2()
+        self._model = RankingModel(self._db)
         self._server_socket = None
         self._running = False
 
@@ -134,8 +133,6 @@ class RankerServer:
                 candidates=request["candidates"],
                 position=request.get("position", 0),
             )
-            if self._model.current_phase() == 1:
-                self._model.maybe_train_phase2()
             # Incremental sync: immediately persist to custom_phrase.txt
             try:
                 sync_incremental(request["chosen"], request["pinyin"])

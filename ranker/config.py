@@ -5,7 +5,7 @@ DATA_DIR = Path(os.environ.get("IME_DATA_DIR", Path.home() / ".local/share/custo
 
 SOCKET_PATH = DATA_DIR / "ranker.sock"
 DB_PATH = DATA_DIR / "selections.db"
-MODEL_PATH = DATA_DIR / "sgd_model.pkl"
+FTRL_WEIGHTS_PATH = DATA_DIR / "ftrl_weights.json"
 
 ALPHA = 0.4
 BETA = 0.4
@@ -13,5 +13,3 @@ GAMMA = 0.2
 DECAY = 0.85
 SKIP_PENALTY = 0.15
 LENGTH_BONUS = 0.15
-
-PHASE2_THRESHOLD = 50
