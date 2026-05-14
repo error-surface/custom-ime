@@ -43,7 +43,11 @@ class RankingModel:
         # Normalize skip penalty by selection count: a frequently-chosen word
         # overcomes early skips; a never-chosen word keeps the full penalty.
         skip_penalty = SKIP_PENALTY * skip_count / (1 + unigram)
-        length_bonus = LENGTH_BONUS * max(0, len(word) - 1)
+        # Quadratic boost by extra characters: 2字→0.09  3字→0.36  4字→0.81
+        # 5字→1.44  6字→2.25.  Long phrases win cold start; frequent short
+        # words still dominate once they accumulate enough selections.
+        extra = max(0, len(word) - 1)
+        length_bonus = LENGTH_BONUS * (extra ** 2)
         return ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty + length_bonus
 
     def _extract_features(self, word: str, context: str, position: int,
