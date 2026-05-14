@@ -23,6 +23,9 @@ class RankerServer:
         self._server_socket = None
         self._running = False
 
+    JANITOR_INTERVAL = 21600   # trim every 6 hours
+    VACUUM_INTERVAL = 86400    # vacuum every 24 hours
+
     def _start_sync_thread(self):
         """Background thread: periodic full sync to custom_phrase.txt."""
         def _sync_loop():
@@ -36,6 +39,26 @@ class RankerServer:
                 time.sleep(self.SYNC_INTERVAL)
 
         t = threading.Thread(target=_sync_loop, daemon=True)
+        t.start()
+
+    def _start_janitor_thread(self):
+        """Background thread: periodic DB cleanup (trim old data, vacuum)."""
+        def _janitor_loop():
+            last_vacuum = 0
+            while self._running:
+                try:
+                    self._db.trim_old_selections(keep_days=90)
+                    self._db.remove_noise_words(max_skip_ratio=5.0)
+                    now = time.time()
+                    if now - last_vacuum > self.VACUUM_INTERVAL:
+                        self._db._conn.execute("VACUUM")
+                        last_vacuum = now
+                        print("[janitor] vacuum complete")
+                except Exception as e:
+                    print(f"[janitor] error: {e}")
+                time.sleep(self.JANITOR_INTERVAL)
+
+        t = threading.Thread(target=_janitor_loop, daemon=True)
         t.start()
 
     def serve(self):
@@ -64,6 +87,7 @@ class RankerServer:
         except Exception as e:
             print(f"[sync] initial sync error: {e}")
         self._start_sync_thread()
+        self._start_janitor_thread()
 
         while self._running:
             try:

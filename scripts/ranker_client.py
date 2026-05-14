@@ -3,11 +3,21 @@ Thin socket client for Lua → Python ranker communication.
 Reads a JSON request from stdin, sends it to the Unix socket,
 and prints the response. Lua calls this via io.popen to avoid
 shell-based JSON injection.
+
+A SIGALRM hard timeout (3s) ensures the process dies even if the
+socket call hangs; Lua then falls back to original candidate order.
 """
 import argparse
 import json
+import signal
 import socket
 import sys
+
+HARD_TIMEOUT = 3  # seconds
+
+
+def _on_timeout(*_):
+    sys.exit(1)
 
 
 def send(sock_path: str, request: str, timeout: float = 2.0) -> str:
@@ -23,6 +33,9 @@ def send(sock_path: str, request: str, timeout: float = 2.0) -> str:
 
 
 def main():
+    signal.signal(signal.SIGALRM, _on_timeout)
+    signal.alarm(HARD_TIMEOUT)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("sock_path", help="Path to Unix domain socket")
     parser.add_argument("--async", dest="async_mode", action="store_true",
@@ -39,7 +52,7 @@ def main():
             sock.sendall(request.encode() + b"\n")
             sock.close()
         except Exception:
-            pass  # fire-and-forget: silently ignore errors
+            pass
         return
 
     try:
