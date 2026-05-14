@@ -26,6 +26,7 @@ class SelectionDB:
             CREATE TABLE IF NOT EXISTS unigram_freq (
                 word TEXT PRIMARY KEY,
                 count INTEGER NOT NULL DEFAULT 0,
+                skip_count INTEGER NOT NULL DEFAULT 0,
                 last_used REAL NOT NULL
             );
             CREATE TABLE IF NOT EXISTS bigram_freq (
@@ -35,6 +36,11 @@ class SelectionDB:
                 PRIMARY KEY (prev_word, curr_word)
             );
         """)
+        # Migration: add skip_count column if missing (pre-optimization databases)
+        try:
+            self._conn.execute("ALTER TABLE unigram_freq ADD COLUMN skip_count INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         self._conn.commit()
 
     def record_selection(self, pinyin: str, context: str, chosen: str,
@@ -46,10 +52,19 @@ class SelectionDB:
             (pinyin, context, chosen, json.dumps(candidates, ensure_ascii=False), position, now),
         )
         self._conn.execute(
-            "INSERT INTO unigram_freq (word, count, last_used) VALUES (?, 1, ?) "
+            "INSERT INTO unigram_freq (word, count, skip_count, last_used) VALUES (?, 1, 0, ?) "
             "ON CONFLICT(word) DO UPDATE SET count = count + 1, last_used = ?",
             (chosen, now, now),
         )
+        # Implicit negative feedback: increment skip_count for candidates
+        # shown before the chosen position that the user passed over.
+        for i, c in enumerate(candidates):
+            if i < position and c != chosen:
+                self._conn.execute(
+                    "INSERT INTO unigram_freq (word, count, skip_count, last_used) VALUES (?, 0, 1, ?) "
+                    "ON CONFLICT(word) DO UPDATE SET skip_count = skip_count + 1",
+                    (c, now),
+                )
         if context:
             self._conn.execute(
                 "INSERT INTO bigram_freq (prev_word, curr_word, count) VALUES (?, ?, 1) "
@@ -72,6 +87,12 @@ class SelectionDB:
         row = self._conn.execute(
             "SELECT count FROM bigram_freq WHERE prev_word = ? AND curr_word = ?",
             (prev_word, curr_word),
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_skip_count(self, word: str) -> int:
+        row = self._conn.execute(
+            "SELECT skip_count FROM unigram_freq WHERE word = ?", (word,)
         ).fetchone()
         return row[0] if row else 0
 

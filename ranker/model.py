@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.linear_model import SGDClassifier
 
-from ranker.config import ALPHA, BETA, GAMMA, DECAY, PHASE2_THRESHOLD
+from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, PHASE2_THRESHOLD
 from ranker.db import SelectionDB
 
 
@@ -34,12 +34,19 @@ class RankingModel:
     def _score_phase1(self, word: str, context: str) -> float:
         unigram = self._db.get_unigram_freq(word)
         bigram = self._db.get_bigram_freq(context, word) if context else 0
+        skip_count = self._db.get_skip_count(word)
         last_used = self._db.get_last_used(word)
         recency = 0.0
         if last_used is not None:
             days_ago = (time.time() - last_used) / 86400
             recency = math.pow(DECAY, days_ago)
-        return ALPHA * unigram + BETA * bigram + GAMMA * recency
+        # Log scaling: first selection has more impact; diminishing returns after.
+        unigram_score = math.log(1 + unigram)
+        bigram_score = math.log(1 + bigram)
+        # Normalize skip penalty by selection count: a frequently-chosen word
+        # overcomes early skips; a never-chosen word keeps the full penalty.
+        skip_penalty = SKIP_PENALTY * skip_count / (1 + unigram)
+        return ALPHA * unigram_score + BETA * bigram_score + GAMMA * recency - skip_penalty
 
     def _extract_features(self, word: str, context: str, position: int,
                           n_candidates: int) -> list:
