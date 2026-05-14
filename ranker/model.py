@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.linear_model import SGDClassifier
 
-from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, PHASE2_THRESHOLD
+from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS, PHASE2_THRESHOLD
 from ranker.db import SelectionDB
 
 
@@ -43,7 +43,8 @@ class RankingModel:
         # Normalize skip penalty by selection count: a frequently-chosen word
         # overcomes early skips; a never-chosen word keeps the full penalty.
         skip_penalty = SKIP_PENALTY * skip_count / (1 + unigram)
-        return ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty
+        length_bonus = LENGTH_BONUS * max(0, len(word) - 1)
+        return ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty + length_bonus
 
     def _extract_features(self, word: str, context: str, position: int,
                           n_candidates: int) -> list:
