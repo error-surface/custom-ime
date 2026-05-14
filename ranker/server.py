@@ -7,6 +7,7 @@ from pathlib import Path
 from ranker.config import SOCKET_PATH, DB_PATH, MODEL_PATH
 from ranker.db import SelectionDB
 from ranker.model import RankingModel
+from ranker.seed_data import seed as seed_db
 from ranker.sync_phrases import sync_full, sync_incremental
 
 
@@ -47,6 +48,14 @@ class RankerServer:
         self._server_socket.listen(5)
         self._server_socket.settimeout(0.5)
         self._running = True
+
+        # Seed common vocabulary for cold-start
+        try:
+            inserted, boosted = seed_db()
+            if inserted or boosted:
+                print(f"[seed] {inserted} new + {boosted} boosted")
+        except Exception as e:
+            print(f"[seed] error: {e}")
 
         # Initial full sync + start periodic sync thread
         try:

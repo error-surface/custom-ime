@@ -83,7 +83,7 @@ def main():
 
     # Check 4: Round-trip learning (select then rank verifies ordering)
     try:
-        for _ in range(3):
+        for _ in range(5):
             send_request(SOCKET_PATH, {
                 "action": "select",
                 "pinyin": "ceshi_smoke",
@@ -99,7 +99,7 @@ def main():
             "candidates": ["测试", "策时", "侧视"],
         })
         if resp.get("ranked", [None])[0] == "侧视":
-            print(f"  [{PASS}] Learning round-trip: '侧视' ranked first after 3 selections")
+            print(f"  [{PASS}] Learning round-trip: '侧视' ranked first after 5 selections")
             results.append(True)
         else:
             print(f"  [{FAIL}] Learning round-trip failed: {resp}")
