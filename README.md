@@ -160,12 +160,12 @@ Edit `ranker/config.py` to tune the model behavior:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ALPHA` | `0.4` | Weight for unigram frequency |
-| `BETA` | `0.4` | Weight for bigram context |
-| `GAMMA` | `0.2` | Weight for recency |
-| `DECAY` | `0.85` | Recency decay factor per day |
+| `ALPHA` | `0.30` | Weight for unigram frequency |
+| `BETA` | `0.45` | Weight for bigram context |
+| `GAMMA` | `0.25` | Weight for recency |
+| `DECAY` | `0.80` | Recency decay factor per day |
 | `SKIP_PENALTY` | `0.15` | Penalty per skip (candidates passed over) |
-| `LENGTH_BONUS` | `0.20` | Quadratic bonus for multi-character words |
+| `LENGTH_BONUS` | `0.25` | Quadratic bonus for multi-character words |
 
 ## Smoke Test
 

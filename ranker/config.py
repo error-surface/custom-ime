@@ -7,9 +7,9 @@ SOCKET_PATH = DATA_DIR / "ranker.sock"
 DB_PATH = DATA_DIR / "selections.db"
 FTRL_WEIGHTS_PATH = DATA_DIR / "ftrl_weights.json"
 
-ALPHA = 0.4
-BETA = 0.4
-GAMMA = 0.2
-DECAY = 0.85
+ALPHA = 0.30
+BETA = 0.45
+GAMMA = 0.25
+DECAY = 0.80
 SKIP_PENALTY = 0.15
-LENGTH_BONUS = 0.20
+LENGTH_BONUS = 0.25
