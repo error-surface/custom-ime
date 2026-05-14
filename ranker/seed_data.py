@@ -2,11 +2,14 @@
 Pre-built seed vocabulary for cold-start.
 Only INSERT OR IGNORE — never overwrites user-learned data.
 """
+import json
 import sqlite3
 import time
 from pathlib import Path
 
 from ranker.config import DB_PATH
+
+DICTIONARY_DATA = Path(__file__).parent / "dictionary_data.json"
 
 SEED_WORDS = [
     # (word, initial_count)
@@ -404,37 +407,23 @@ SEED_WORDS = [
 ]
 
 
-def seed(db_path=None, min_count=1):
-    """
-    Pre-populate unigram_freq with seed words.
+def _load_bulk_words():
+    """Load words from THUOCL + chinese-xinhua bulk dictionary."""
+    if not DICTIONARY_DATA.exists():
+        return []
+    return json.loads(DICTIONARY_DATA.read_text(encoding="utf-8"))
 
-    Rules:
-    - Word doesn't exist → INSERT with seed count
-    - Word exists but count < seed_count → UPDATE to seed_count
-      (handles skip-only rows with count=0 that block INSERT OR IGNORE)
-    - Word exists with count >= seed_count → leave alone (user data wins)
 
-    Returns (new_words, boosted_words).
-    """
-    if db_path is None:
-        db_path = DB_PATH
-
-    if not db_path.exists():
-        return (0, 0)
-
-    conn = sqlite3.connect(str(db_path))
-    now = time.time()
+def _seed_word_list(conn, words, now, min_count):
+    """INSERT or UPDATE words in unigram_freq. Returns (inserted, boosted)."""
     inserted = 0
     boosted = 0
-
-    for word, seed_count in SEED_WORDS:
+    for word, seed_count in words:
         if seed_count < min_count:
             continue
-
         row = conn.execute(
             "SELECT count FROM unigram_freq WHERE word = ?", (word,)
         ).fetchone()
-
         if row is None:
             conn.execute(
                 "INSERT INTO unigram_freq (word, count, skip_count, last_used) "
@@ -448,10 +437,45 @@ def seed(db_path=None, min_count=1):
                 (seed_count, now, word),
             )
             boosted += 1
+    return inserted, boosted
+
+
+def seed(db_path=None, min_count=1):
+    """
+    Pre-populate unigram_freq with seed words.
+
+    Two tiers:
+    1. Bulk dictionary (THUOCL + chinese-xinhua idioms, ~82K words)
+       - Loaded from dictionary_data.json
+    2. Manual SEED_WORDS (~1K hand-tuned homophone groups)
+       - Applied second, overrides bulk counts where higher
+
+    Rules:
+    - Word doesn't exist → INSERT with seed count
+    - Word exists but count < seed_count → UPDATE to seed_count
+    - Word exists with count >= seed_count → leave alone (user data wins)
+
+    Returns (new_words, boosted_words).
+    """
+    if db_path is None:
+        db_path = DB_PATH
+
+    if not db_path.exists():
+        return (0, 0)
+
+    conn = sqlite3.connect(str(db_path))
+    now = time.time()
+
+    # Tier 1: Bulk dictionary (lower priority)
+    bulk_words = _load_bulk_words()
+    ins1, bst1 = _seed_word_list(conn, bulk_words, now, min_count)
+
+    # Tier 2: Manual homophone groups (higher priority, overrides)
+    ins2, bst2 = _seed_word_list(conn, SEED_WORDS, now, min_count)
 
     conn.commit()
     conn.close()
-    return (inserted, boosted)
+    return (ins1 + ins2, bst1 + bst2)
 
 
 if __name__ == "__main__":
