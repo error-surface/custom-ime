@@ -1,6 +1,5 @@
 local project_dir = os.getenv("HOME") .. "/custom-ime"
-local python = project_dir .. "/.venv/bin/python"
-local helper = project_dir .. "/scripts/ranker_client.py"
+local relay = project_dir .. "/scripts/ranker_relay"
 local socket_path = os.getenv("HOME") .. "/.local/share/custom-ime/ranker.sock"
 
 local function json_escape(s)
@@ -28,7 +27,7 @@ local function send_request(request_json)
     f:write(request_json)
     f:close()
 
-    local cmd = string.format("'%s' '%s' '%s' < '%s' 2>/dev/null", python, helper, socket_path, tmp)
+    local cmd = string.format("'%s' '%s' < '%s' 2>/dev/null", relay, socket_path, tmp)
     local sock = io.popen(cmd, "r")
     if not sock then
         os.remove(tmp)

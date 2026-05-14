@@ -123,6 +123,7 @@ custom-ime/
 │   ├── install.sh                          # Installs Squirrel and symlinks RIME config
 │   ├── start_ranker.sh                     # Start / install / uninstall the service
 │   ├── ranker_client.py                    # Socket relay (Lua → Python), stdin+timeout
+│   ├── ranker_relay.c                      # C socket relay (~2ms startup, replaces Python)
 │   ├── smoke_test.py                       # 4-check end-to-end verification
 │   └── com.custom-ime.ranker.plist         # launchd agent definition
 ├── tests/
@@ -164,7 +165,7 @@ Edit `ranker/config.py` to tune the model behavior:
 | `GAMMA` | `0.2` | Weight for recency |
 | `DECAY` | `0.85` | Recency decay factor per day |
 | `SKIP_PENALTY` | `0.15` | Penalty per skip (candidates passed over) |
-| `LENGTH_BONUS` | `0.15` | Quadratic bonus for multi-character words |
+| `LENGTH_BONUS` | `0.20` | Quadratic bonus for multi-character words |
 
 ## Smoke Test
 

@@ -1,6 +1,5 @@
 local project_dir = os.getenv("HOME") .. "/custom-ime"
-local python = project_dir .. "/.venv/bin/python"
-local helper = project_dir .. "/scripts/ranker_client.py"
+local relay = project_dir .. "/scripts/ranker_relay"
 local socket_path = os.getenv("HOME") .. "/.local/share/custom-ime/ranker.sock"
 
 local function json_escape(s)
@@ -87,8 +86,8 @@ local function send_fire_and_forget(request_json)
     f:close()
 
     os.execute(string.format(
-        "'%s' '%s' '%s' --async < '%s' &>/dev/null &",
-        python, helper, socket_path, tmp
+        "'%s' '%s' --async < '%s' &>/dev/null &",
+        relay, socket_path, tmp
     ))
 end
 
