@@ -33,6 +33,7 @@ class RankingModel:
                 p1 = p1_scores[c]
                 ftrl_prob = self._ftrl.predict(
                     c, context, i, len(candidates), phase1_score=p1,
+                    pinyin=pinyin,
                 )
                 # FTRL correction: boost (prob > 0.5) or penalize (prob < 0.5)
                 # The adjustment is modest so Phase 1 heuristics still dominate
@@ -66,4 +67,4 @@ class RankingModel:
         if len(candidates) > 0:
             p1_scores = {c: self._score_phase1(c, context) for c in candidates}
             self._ftrl.update(chosen, context, candidates, position,
-                              phase1_scores=p1_scores)
+                              phase1_scores=p1_scores, pinyin=pinyin)

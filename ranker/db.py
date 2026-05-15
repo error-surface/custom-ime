@@ -13,6 +13,7 @@ class SelectionDB:
         self._create_tables()
 
     def _create_tables(self):
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS selections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

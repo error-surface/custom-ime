@@ -39,18 +39,31 @@ class FTRLRanker:
         return self._update_count >= MIN_SAMPLES
 
     def _featurize(self, word, context, position, n_candidates,
-                   phase1_score=0.0):
+                   phase1_score=0.0, pinyin=""):
         """Sparse features.  phase1_score lets FTRL learn residuals."""
         feats = {
             "bias": 1.0,
             "len": len(word),
+            "n_cands": n_candidates,
             "pos_norm": position / max(n_candidates, 1),
             "phase1": phase1_score,
         }
+        # Word length one-hot (1, 2, 3, 4+)
+        feats[f"wlen_{min(len(word), 4)}"] = 1.0
+        # RIME's original ordering is a strong signal
+        if position == 0:
+            feats["is_first"] = 1.0
+        # Time bucket (4 periods)
         hour = time.localtime().tm_hour
-        feats[f"hour_{hour // 6}"] = 1.0   # 4 time buckets
+        feats[f"hour_{hour // 6}"] = 1.0
+        # Context features
         if context:
+            feats["has_ctx"] = 1.0
             feats[f"bigram_{context}_{word}"] = 1.0
+        # Pinyin identity (FTRL learns per-pinyin preferences)
+        if pinyin:
+            feats[f"py_{pinyin}"] = 1.0
+        # Per-word identity
         feats[f"word_{word}"] = 1.0
         return feats
 
@@ -69,14 +82,14 @@ class FTRLRanker:
         return _safe_sigmoid(wTx)
 
     def predict(self, word, context, position, n_candidates,
-                phase1_score=0.0):
+                phase1_score=0.0, pinyin=""):
         """Return probability [0, 1] that this candidate is the right one."""
         feats = self._featurize(word, context, position, n_candidates,
-                                phase1_score)
+                                phase1_score, pinyin)
         return self._score(feats)
 
     def update(self, chosen, context, candidates, position,
-               phase1_scores=None):
+               phase1_scores=None, pinyin=""):
         """Online update after a user selection.
 
         phase1_scores: dict of word→Phase1 score, used as features.
@@ -86,6 +99,7 @@ class FTRLRanker:
             feats = self._featurize(
                 c, context, i, len(candidates),
                 phase1_score=p1.get(c, 0.0),
+                pinyin=pinyin,
             )
             label = 1.0 if c == chosen else 0.0
             pred = self._score(feats)
