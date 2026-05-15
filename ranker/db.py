@@ -42,6 +42,11 @@ class SelectionDB:
             self._conn.execute("ALTER TABLE unigram_freq ADD COLUMN skip_count INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass
+        # Migration: add reject_count for explicit user corrections
+        try:
+            self._conn.execute("ALTER TABLE unigram_freq ADD COLUMN reject_count INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         self._conn.commit()
 
     def record_selection(self, pinyin: str, context: str, chosen: str,
@@ -97,6 +102,22 @@ class SelectionDB:
         ).fetchone()
         return row[0] if row else 0
 
+    def record_reject(self, word: str):
+        now = time.time()
+        self._conn.execute(
+            "INSERT INTO unigram_freq (word, count, skip_count, reject_count, last_used) "
+            "VALUES (?, 0, 0, 1, ?) "
+            "ON CONFLICT(word) DO UPDATE SET reject_count = reject_count + 1",
+            (word, now),
+        )
+        self._conn.commit()
+
+    def get_reject_count(self, word: str) -> int:
+        row = self._conn.execute(
+            "SELECT reject_count FROM unigram_freq WHERE word = ?", (word,)
+        ).fetchone()
+        return row[0] if row else 0
+
     def get_last_used(self, word: str):
         row = self._conn.execute(
             "SELECT last_used FROM unigram_freq WHERE word = ?", (word,)
@@ -118,8 +139,8 @@ class SelectionDB:
     def remove_noise_words(self, max_skip_ratio=5.0):
         self._conn.execute("""
             DELETE FROM unigram_freq
-            WHERE count = 0 AND skip_count > 0
-               OR (count > 0 AND CAST(skip_count AS REAL) / count > ?)
+            WHERE count = 0 AND (skip_count > 0 OR reject_count > 0)
+               OR (count > 0 AND (CAST(skip_count AS REAL) + CAST(reject_count AS REAL)) / count > ?)
         """, (max_skip_ratio,))
         self._conn.commit()
 

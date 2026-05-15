@@ -1,12 +1,47 @@
 patch:
+  # ── 句子模式 ──────────────────────────────────────
   switches/@2/reset: 1
-  # Sentence mode: treat input as a continuous sentence, combining
-  # characters into words rather than showing single-char candidates.
   translator/enable_sentence: true
   translator/enable_user_dict: true
   translator/sentence_over_completion: true
+
+  # ── 每页候选数 ────────────────────────────────────
+  # 默认5个太少，设为9个减少翻页
+  menu/page_size: 9
+
+  # ── 自定义过滤器 ──────────────────────────────────
   engine/filters:
     - simplifier
     - uniquifier
     - lua_filter@*rerank_filter
   engine/processors/@before 0: lua_processor@*select_notifier
+
+  # ── 拼写选项 ──────────────────────────────────────
+  # 开启用户词典
+  translator/dictionary: luna_pinyin
+
+  # ── 模糊音 (可选，去掉注释开启) ───────────────────
+  # 解决平翘舌、前后鼻音、nl不分等常见拼音错误
+  # 如果开启了，输入zongguo也能匹配"中国"
+  # 如果习惯准确拼音输入，建议保持关闭(关闭时输入更精准)
+  # 'speller/algebra':
+  #   # 翘舌/平舌模糊
+  #   - xform/^zh/z/
+  #   - xform/^ch/c/
+  #   - xform/^sh/s/
+  #   # 前后鼻音模糊
+  #   - xform/^n/l/
+  #   - xform/ng$/$/
+  #   # hn合并
+  #   - xform/^r/l/
+  #   - xform/^hu/fu/
+  #   # 韵母模糊
+  #   - xform/ian$/iang$/
+  #   - xform/uang$/uan$/
+
+  # ── 标点符号 ──────────────────────────────────────
+  # 中文标点自动配对: 输入( 自动补 )
+  punctuator/full_shape:
+    __include: punctuation:/full_shape
+  punctuator/half_shape:
+    __include: punctuation:/half_shape

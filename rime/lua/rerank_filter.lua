@@ -157,6 +157,7 @@ local function rerank_filter(input, env)
         ctx:set_property("custom_ime.last_pinyin", pinyin)
         ctx:set_property("custom_ime.last_context", context)
         ctx:set_property("custom_ime.last_candidates_json", json_encode_candidates(final_order))
+        ctx:set_property("custom_ime.last_original_candidates_json", json_encode_candidates(candidates))
     end
 end
 

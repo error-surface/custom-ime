@@ -14,6 +14,7 @@ mkdir -p "$RIME_DIR/lua"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ln -sf "$SCRIPT_DIR/rime/default.custom.yaml" "$RIME_DIR/default.custom.yaml"
 ln -sf "$SCRIPT_DIR/rime/luna_pinyin.custom.yaml" "$RIME_DIR/luna_pinyin.custom.yaml"
+ln -sf "$SCRIPT_DIR/rime/squirrel.custom.yaml" "$RIME_DIR/squirrel.custom.yaml"
 ln -sf "$SCRIPT_DIR/rime/lua/rerank_filter.lua" "$RIME_DIR/lua/rerank_filter.lua"
 ln -sf "$SCRIPT_DIR/rime/lua/select_notifier.lua" "$RIME_DIR/lua/select_notifier.lua"
 

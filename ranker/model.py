@@ -2,7 +2,7 @@ import math
 import time
 from pathlib import Path
 
-from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS, FTRL_WEIGHTS_PATH
+from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, REJECT_PENALTY, LENGTH_BONUS, FTRL_WEIGHTS_PATH
 from ranker.db import SelectionDB
 from ranker.local_ranker import FTRLRanker, MIN_SAMPLES
 
@@ -25,6 +25,7 @@ class RankingModel:
 
         # Phase 1: heuristic scores (always used, handles cold start)
         p1_scores = {c: self._score_phase1(c, context) for c in candidates}
+        max_p1 = max(p1_scores.values()) if p1_scores else 0.0
 
         # Phase 2: blend FTRL corrections on top of Phase 1
         if self._ftrl.ready:
@@ -33,7 +34,7 @@ class RankingModel:
                 p1 = p1_scores[c]
                 ftrl_prob = self._ftrl.predict(
                     c, context, i, len(candidates), phase1_score=p1,
-                    pinyin=pinyin,
+                    max_phase1=max_p1, pinyin=pinyin,
                 )
                 # FTRL correction: boost (prob > 0.5) or penalize (prob < 0.5)
                 # The adjustment is modest so Phase 1 heuristics still dominate
@@ -49,15 +50,17 @@ class RankingModel:
         unigram = self._db.get_unigram_freq(word)
         bigram = self._db.get_bigram_freq(context, word) if context else 0
         skip_count = self._db.get_skip_count(word)
+        reject_count = self._db.get_reject_count(word)
         last_used = self._db.get_last_used(word)
         recency = 0.0
         if last_used is not None:
             days_ago = (time.time() - last_used) / 86400
             recency = math.pow(DECAY, days_ago)
         skip_penalty = SKIP_PENALTY * skip_count / (1 + unigram)
+        reject_penalty = REJECT_PENALTY * reject_count / (1 + unigram)
         extra = max(0, len(word) - 1)
         length_bonus = LENGTH_BONUS * (extra ** 2)
-        return ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty + length_bonus
+        return ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty - reject_penalty + length_bonus
 
     def record(self, pinyin: str, context: str, chosen: str,
                candidates: list, position: int):
@@ -68,3 +71,13 @@ class RankingModel:
             p1_scores = {c: self._score_phase1(c, context) for c in candidates}
             self._ftrl.update(chosen, context, candidates, position,
                               phase1_scores=p1_scores, pinyin=pinyin)
+
+    def reject(self, pinyin: str, context: str, rejected: str,
+               candidates: list = None):
+        self._db.record_reject(rejected)
+
+        # Negative FTRL update: treat rejected word as negative example
+        if candidates and len(candidates) > 0:
+            p1_scores = {c: self._score_phase1(c, context) for c in candidates}
+            self._ftrl.update_reject(rejected, context, candidates,
+                                     phase1_scores=p1_scores, pinyin=pinyin)

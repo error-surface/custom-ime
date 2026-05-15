@@ -39,7 +39,7 @@ class FTRLRanker:
         return self._update_count >= MIN_SAMPLES
 
     def _featurize(self, word, context, position, n_candidates,
-                   phase1_score=0.0, pinyin=""):
+                   phase1_score=0.0, max_phase1=0.0, pinyin=""):
         """Sparse features.  phase1_score lets FTRL learn residuals."""
         feats = {
             "bias": 1.0,
@@ -48,11 +48,15 @@ class FTRLRanker:
             "pos_norm": position / max(n_candidates, 1),
             "phase1": phase1_score,
         }
+        # Homophone competition: how far behind the group leader
+        feats["phase1_gap"] = phase1_score - max_phase1
         # Word length one-hot (1, 2, 3, 4+)
         feats[f"wlen_{min(len(word), 4)}"] = 1.0
         # RIME's original ordering is a strong signal
         if position == 0:
             feats["is_first"] = 1.0
+        if position == n_candidates - 1 and n_candidates > 1:
+            feats["is_last"] = 1.0
         # Time bucket (4 periods)
         hour = time.localtime().tm_hour
         feats[f"hour_{hour // 6}"] = 1.0
@@ -63,6 +67,13 @@ class FTRLRanker:
         # Pinyin identity (FTRL learns per-pinyin preferences)
         if pinyin:
             feats[f"py_{pinyin}"] = 1.0
+            # Abbreviated pinyin detection: consonant-only segments = initials input
+            segments = pinyin.replace("'", " ").replace("-", " ").split()
+            has_abbrev = any(s and not any(c in s for c in "aeiouüAEIOUÜ") for s in segments)
+            if has_abbrev:
+                feats["is_abbrev"] = 1.0
+            # Pinyin-to-word length ratio (small = more abbreviated)
+            feats["py_len_ratio"] = len(pinyin) / max(len(word), 1)
         # Per-word identity
         feats[f"word_{word}"] = 1.0
         return feats
@@ -82,10 +93,10 @@ class FTRLRanker:
         return _safe_sigmoid(wTx)
 
     def predict(self, word, context, position, n_candidates,
-                phase1_score=0.0, pinyin=""):
+                phase1_score=0.0, max_phase1=0.0, pinyin=""):
         """Return probability [0, 1] that this candidate is the right one."""
         feats = self._featurize(word, context, position, n_candidates,
-                                phase1_score, pinyin)
+                                phase1_score, max_phase1, pinyin)
         return self._score(feats)
 
     def update(self, chosen, context, candidates, position,
@@ -95,15 +106,48 @@ class FTRLRanker:
         phase1_scores: dict of word→Phase1 score, used as features.
         """
         p1 = phase1_scores or {}
+        max_p1 = max(p1.values()) if p1 else 0.0
         for i, c in enumerate(candidates):
             feats = self._featurize(
                 c, context, i, len(candidates),
                 phase1_score=p1.get(c, 0.0),
+                max_phase1=max_p1,
                 pinyin=pinyin,
             )
             label = 1.0 if c == chosen else 0.0
             pred = self._score(feats)
             grad = pred - label
+            for f, x in feats.items():
+                n_old = self.n.get(f, 0.0)
+                n_new = n_old + grad * grad
+                sigma = (math.sqrt(n_new) - math.sqrt(n_old)) / self.alpha
+                w = self._compute_weight(f)
+                self.z[f] = self.z.get(f, 0.0) + grad * x - sigma * w
+                self.n[f] = n_new
+        self._update_count += 1
+        self._save()
+
+    def update_reject(self, rejected, context, candidates,
+                      phase1_scores=None, pinyin=""):
+        """Stronger negative update when user explicitly rejects a word.
+
+        The rejected word gets label=0 with 2x gradient weight.
+        Other candidates get label=0 normally (we don't know which is correct).
+        """
+        p1 = phase1_scores or {}
+        max_p1 = max(p1.values()) if p1 else 0.0
+        for i, c in enumerate(candidates):
+            feats = self._featurize(
+                c, context, i, len(candidates),
+                phase1_score=p1.get(c, 0.0),
+                max_phase1=max_p1,
+                pinyin=pinyin,
+            )
+            label = 0.0  # all are negative in a rejection event
+            pred = self._score(feats)
+            grad = pred - label
+            if c == rejected:
+                grad *= 2.0  # double gradient for the explicitly rejected word
             for f, x in feats.items():
                 n_old = self.n.get(f, 0.0)
                 n_new = n_old + grad * grad

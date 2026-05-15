@@ -75,8 +75,6 @@ local function json_decode_string_array(s)
 end
 
 local function send_fire_and_forget(request_json)
-    -- Write request to temp file, pipe to helper via stdin redirection.
-    -- This avoids shell interpolation of JSON content entirely.
     local tmp = os.tmpname()
     local f = io.open(tmp, "w")
     if not f then
@@ -114,6 +112,29 @@ local function select_notifier(env)
                 pos = i - 1
                 break
             end
+        end
+
+        -- Re-select detection: user retyped the same pinyin and chose a
+        -- different word → the previous choice was a mistake.
+        if ctx.get_property then
+            local prev_pinyin = ctx:get_property("custom_ime.prev_pinyin") or ""
+            local prev_chosen = ctx:get_property("custom_ime.prev_chosen") or ""
+            local prev_candidates = ctx:get_property("custom_ime.prev_candidates_json") or "[]"
+            if prev_pinyin == pinyin and prev_chosen ~= "" and prev_chosen ~= text then
+                local reject_request = string.format(
+                    '{"action":"reject","pinyin":"%s","context":"%s","rejected":"%s","candidates":%s}',
+                    json_escape(prev_pinyin), json_escape(context),
+                    json_escape(prev_chosen), prev_candidates
+                )
+                send_fire_and_forget(reject_request)
+            end
+        end
+
+        -- Save state for next re-select detection
+        if ctx.set_property then
+            ctx:set_property("custom_ime.prev_pinyin", pinyin)
+            ctx:set_property("custom_ime.prev_chosen", text)
+            ctx:set_property("custom_ime.prev_candidates_json", candidates_json)
         end
 
         local request = string.format(

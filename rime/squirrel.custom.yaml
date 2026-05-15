@@ -1,0 +1,79 @@
+patch:
+  # ── 外观 ──────────────────────────────────────────
+  style:
+    # 配色方案: native(系统), aqua(碧水), luna(明月), dark_temple(暗堂)
+    color_scheme: aqua
+    # 字体: PingFangSC(苹方), Avenir, Helvetica, STHeiti(黑体)
+    font_face: "PingFangSC-Regular"
+    font_point: 16
+    label_font_face: "PingFangSC-Light"
+    label_font_point: 12
+    # 候选窗: 横向(horizontal) / 堆叠(stacked)
+    candidate_list_layout: stacked
+    # 候选显示格式 [序号]. [候选词] [注释]
+    candidate_format: "%c %@"
+    # 圆角
+    corner_radius: 8
+    # 行间距
+    line_spacing: 4
+    # 候选词间距
+    spacing: 6
+    # 记住窗口位置和大小
+    memorize_size: true
+    # 内嵌预编辑(光标处显示拼音，而非固定在屏幕底部)
+    inline_preedit: true
+    # 不显示翻页提示
+    show_paging: false
+    # 文字方向
+    text_orientation: horizontal
+    # 候选窗不透明度: false(实色), true(半透明)
+    translucency: false
+    # 阴影
+    shadow_size: 0
+    # 边框
+    border_height: 0
+    border_width: 0
+    # 高亮候选圆角
+    hilited_corner_radius: 6
+
+  # ── 应用适配 ──────────────────────────────────────
+  app_options:
+    # 终端保持中文输入(不切ascii)
+    com.apple.Terminal:
+      ascii_mode: false
+    com.googlecode.iterm2:
+      ascii_mode: false
+    # 代码编辑器自动切ascii
+    com.microsoft.VSCode:
+      ascii_mode: true
+    com.apple.dt.Xcode:
+      ascii_mode: true
+    com.sublimetext.2:
+      ascii_mode: true
+    org.vim.MacVim:
+      ascii_mode: true
+      vim_mode: true
+    org.gnu.Emacs:
+      ascii_mode: true
+    # 浏览器不使用inline模式(候选窗跟随光标)
+    com.google.Chrome:
+      inline: false
+    com.microsoft.edgemac:
+      inline: false
+    # Alfred/Spotlight强制ascii
+    com.alfredapp.Alfred:
+      ascii_mode: true
+    com.apple.Spotlight:
+      ascii_mode: true
+    # Telegram使用inline
+    ru.keepcoder.Telegram:
+      inline: true
+
+  # ── 通知 ──────────────────────────────────────────
+  # 状态变化时通知: never / always / appropriate
+  show_notifications_when: never
+
+  # ── 快捷键 ────────────────────────────────────────
+  # 中文/英文切换快捷键 (Control+Shift+2)
+  # 半角/全角切换快捷键 (Control+Shift+3)
+  # 简/繁切换快捷键   (Control+Shift+4)

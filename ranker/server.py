@@ -139,6 +139,14 @@ class RankerServer:
             except Exception as e:
                 print(f"[sync] incremental error: {e}")
             return {"status": "ok"}
+        elif action == "reject":
+            self._model.reject(
+                pinyin=request["pinyin"],
+                context=request.get("context", ""),
+                rejected=request["rejected"],
+                candidates=request.get("candidates", []),
+            )
+            return {"status": "ok"}
         else:
             return {"error": f"unknown action: {action}"}
 
