@@ -36,6 +36,11 @@ class SelectionDB:
                 count INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (prev_word, curr_word)
             );
+            CREATE TABLE IF NOT EXISTS pinyin_last_chosen (
+                pinyin TEXT PRIMARY KEY,
+                word TEXT NOT NULL,
+                timestamp REAL NOT NULL
+            );
         """)
         # Migration: add skip_count column if missing (pre-optimization databases)
         try:
@@ -77,6 +82,11 @@ class SelectionDB:
                 "ON CONFLICT(prev_word, curr_word) DO UPDATE SET count = count + 1",
                 (context, chosen),
             )
+        self._conn.execute(
+            "INSERT INTO pinyin_last_chosen (pinyin, word, timestamp) VALUES (?, ?, ?) "
+            "ON CONFLICT(pinyin) DO UPDATE SET word = excluded.word, timestamp = excluded.timestamp",
+            (pinyin, chosen, now),
+        )
         self._conn.commit()
 
     def get_selection_count(self) -> int:
@@ -111,6 +121,12 @@ class SelectionDB:
             (word, now),
         )
         self._conn.commit()
+
+    def get_last_chosen_for_pinyin(self, pinyin: str) -> str:
+        row = self._conn.execute(
+            "SELECT word FROM pinyin_last_chosen WHERE pinyin = ?", (pinyin,)
+        ).fetchone()
+        return row[0] if row else None
 
     def get_reject_count(self, word: str) -> int:
         row = self._conn.execute(

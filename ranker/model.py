@@ -2,7 +2,7 @@ import math
 import time
 from pathlib import Path
 
-from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, REJECT_PENALTY, LENGTH_BONUS, FTRL_WEIGHTS_PATH
+from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, REJECT_PENALTY, LENGTH_BONUS, LAST_PINYIN_BOOST, FTRL_WEIGHTS_PATH
 from ranker.db import SelectionDB
 from ranker.local_ranker import FTRLRanker, MIN_SAMPLES
 
@@ -24,7 +24,7 @@ class RankingModel:
             return []
 
         # Phase 1: heuristic scores (always used, handles cold start)
-        p1_scores = {c: self._score_phase1(c, context) for c in candidates}
+        p1_scores = {c: self._score_phase1(c, context, pinyin) for c in candidates}
         max_p1 = max(p1_scores.values()) if p1_scores else 0.0
 
         # Phase 2: blend FTRL corrections on top of Phase 1
@@ -46,7 +46,7 @@ class RankingModel:
         scored.sort(key=lambda x: x[1], reverse=True)
         return [c for c, _ in scored]
 
-    def _score_phase1(self, word: str, context: str) -> float:
+    def _score_phase1(self, word: str, context: str, pinyin: str = "") -> float:
         unigram = self._db.get_unigram_freq(word)
         bigram = self._db.get_bigram_freq(context, word) if context else 0
         skip_count = self._db.get_skip_count(word)
@@ -60,7 +60,10 @@ class RankingModel:
         reject_penalty = REJECT_PENALTY * reject_count / (1 + unigram)
         extra = max(0, len(word) - 1)
         length_bonus = LENGTH_BONUS * (extra ** 2)
-        return ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty - reject_penalty + length_bonus
+        score = ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty - reject_penalty + length_bonus
+        if pinyin and word == self._db.get_last_chosen_for_pinyin(pinyin):
+            score += LAST_PINYIN_BOOST
+        return score
 
     def record(self, pinyin: str, context: str, chosen: str,
                candidates: list, position: int):
@@ -68,7 +71,7 @@ class RankingModel:
 
         # Online FTRL update with Phase 1 scores as features
         if len(candidates) > 0:
-            p1_scores = {c: self._score_phase1(c, context) for c in candidates}
+            p1_scores = {c: self._score_phase1(c, context, pinyin) for c in candidates}
             self._ftrl.update(chosen, context, candidates, position,
                               phase1_scores=p1_scores, pinyin=pinyin)
 
@@ -78,6 +81,6 @@ class RankingModel:
 
         # Negative FTRL update: treat rejected word as negative example
         if candidates and len(candidates) > 0:
-            p1_scores = {c: self._score_phase1(c, context) for c in candidates}
+            p1_scores = {c: self._score_phase1(c, context, pinyin) for c in candidates}
             self._ftrl.update_reject(rejected, context, candidates,
                                      phase1_scores=p1_scores, pinyin=pinyin)
