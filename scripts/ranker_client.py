@@ -1,65 +1,76 @@
+#!/usr/bin/env python3
 """
-Thin socket client for Lua → Python ranker communication.
-Reads a JSON request from stdin, sends it to the Unix socket,
-and prints the response. Lua calls this via io.popen to avoid
-shell-based JSON injection.
+ranker_client.py
 
-A SIGALRM hard timeout (3s) ensures the process dies even if the
-socket call hangs; Lua then falls back to original candidate order.
+Safe Unix-socket client for the custom-ime ranker.
+Called from Lua via io.popen("python3 scripts/ranker_client.py ...") to avoid
+brittle echo | nc pipelines.
+
+Usage:
+    python3 scripts/ranker_client.py <socket_path> <request_json>
+
+Or via stdin (if only socket_path is given, reads JSON from stdin):
+    echo '<request_json>' | python3 scripts/ranker_client.py <socket_path>
+
+Exit codes:
+    0  success (response printed to stdout)
+    1  connection or socket error
+    2  invalid arguments
 """
-import argparse
+
 import json
-import signal
 import socket
 import sys
-
-HARD_TIMEOUT = 3  # seconds
-
-
-def _on_timeout(*_):
-    sys.exit(1)
+from pathlib import Path
 
 
-def send(sock_path: str, request: str, timeout: float = 2.0) -> str:
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    sock.connect(sock_path)
-    sock.sendall(request.encode() + b"\n")
-    response = b""
-    while b"\n" not in response:
-        response += sock.recv(4096)
-    sock.close()
-    return response.decode()
+def send_request(sock_path: Path, request: dict) -> dict:
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(5.0)
+    client.connect(str(sock_path))
+    client.sendall(json.dumps(request, ensure_ascii=False).encode("utf-8") + b"\n")
+
+    resp = b""
+    while b"\n" not in resp:
+        chunk = client.recv(4096)
+        if not chunk:
+            break
+        resp += chunk
+    client.close()
+    return json.loads(resp.decode("utf-8"))
 
 
 def main():
-    signal.signal(signal.SIGALRM, _on_timeout)
-    signal.alarm(HARD_TIMEOUT)
+    if len(sys.argv) < 2:
+        print("Usage: ranker_client.py <socket_path> [request_json]", file=sys.stderr)
+        sys.exit(2)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("sock_path", help="Path to Unix domain socket")
-    parser.add_argument("--async", dest="async_mode", action="store_true",
-                        help="Fire and forget (no response expected)")
-    args = parser.parse_args()
+    sock_path = Path(sys.argv[1])
 
-    request = sys.stdin.read()
+    if len(sys.argv) >= 3:
+        request_json = sys.argv[2]
+    else:
+        request_json = sys.stdin.read()
 
-    if args.async_mode:
-        try:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.settimeout(2.0)
-            sock.connect(args.sock_path)
-            sock.sendall(request.encode() + b"\n")
-            sock.close()
-        except Exception:
-            pass
-        return
+    if not request_json.strip():
+        print("Error: empty request", file=sys.stderr)
+        sys.exit(2)
 
     try:
-        response = send(args.sock_path, request)
-        sys.stdout.write(response)
-    except Exception as e:
-        sys.stderr.write(str(e))
+        request = json.loads(request_json)
+    except json.JSONDecodeError as e:
+        print(f"Error: invalid JSON: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    if not sock_path.exists():
+        print(f"Error: socket not found: {sock_path}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        response = send_request(sock_path, request)
+        print(json.dumps(response, ensure_ascii=False))
+    except (socket.error, OSError, json.JSONDecodeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

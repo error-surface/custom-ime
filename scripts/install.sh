@@ -9,7 +9,7 @@ else
 fi
 
 RIME_DIR="$HOME/Library/Rime"
-mkdir -p "$RIME_DIR/lua"
+mkdir -p "$RIME_DIR/lua" "$RIME_DIR/scripts"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ln -sf "$SCRIPT_DIR/rime/default.custom.yaml" "$RIME_DIR/default.custom.yaml"
@@ -17,6 +17,8 @@ ln -sf "$SCRIPT_DIR/rime/luna_pinyin.custom.yaml" "$RIME_DIR/luna_pinyin.custom.
 ln -sf "$SCRIPT_DIR/rime/squirrel.custom.yaml" "$RIME_DIR/squirrel.custom.yaml"
 ln -sf "$SCRIPT_DIR/rime/lua/rerank_filter.lua" "$RIME_DIR/lua/rerank_filter.lua"
 ln -sf "$SCRIPT_DIR/rime/lua/select_notifier.lua" "$RIME_DIR/lua/select_notifier.lua"
+ln -sf "$SCRIPT_DIR/rime/lua/json_helper.lua" "$RIME_DIR/lua/json_helper.lua"
+ln -sf "$SCRIPT_DIR/scripts/ranker_client.py" "$RIME_DIR/scripts/ranker_client.py"
 
 # Compile C socket relay for fast Lua→ranker communication (~2ms startup)
 if [ -f "$SCRIPT_DIR/scripts/ranker_relay.c" ] && command -v cc &>/dev/null; then
