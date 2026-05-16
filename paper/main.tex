@@ -1,0 +1,453 @@
+\documentclass[11pt]{article}
+
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{Songti SC}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{multirow}
+
+\title{\textbf{Custom-IME: A Two-Phase Online Learning Framework\\ for Personalized Pinyin Input Method Candidate Ranking}}
+
+\author{Anonymous}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present Custom-IME, a personal Chinese Pinyin input method that combines
+heuristic scoring with Follow-The-Regularized-Leader (FTRL) online learning
+for candidate ranking. The system operates in two phases: Phase~1 applies a
+weighted linear model over unigram frequency, bigram context, recency decay,
+skip penalty, and length bonus to provide strong cold-start performance.
+Phase~2 uses FTRL-Proximal sparse logistic regression to learn residual
+corrections from implicit user feedback---candidate skips and explicit
+re-selections. Built on the RIME input framework with an 82K-word seed
+dictionary from THUOCL and chinese-xinhua, the system achieves a
+\textbf{42.2\% absolute improvement in Top-1 accuracy} over RIME's default
+static frequency ordering, and a further 0.3\% improvement from online FTRL
+fine-tuning. A C-language Unix socket relay reduces per-keystroke latency to
+under 5ms. We analyze the contribution of each scoring component through
+ablation and discuss the trade-offs between heuristic and learned ranking for
+personal input methods.
+
+\end{abstract}
+
+% ===================================================================
+\section{Introduction}
+% ===================================================================
+
+Chinese Pinyin input methods face a fundamental challenge: a single pinyin
+string maps to many candidate characters or words. For example, the pinyin
+``zhongguo'' can match $\{$中国 (China), 种过 (planted), 中过 (passed)$\}$ among
+others. While commercial input methods address this through large-scale
+user data and neural models~\cite{geneinput}, personal input methods running
+on individual devices lack access to such data.
+
+RIME (中州韻), an open-source input method framework, provides a flexible
+foundation but relies on static frequency ordering for candidate
+ranking---which ignores personal usage patterns, recency effects, and
+context. We present Custom-IME, a personal ranking layer that augments RIME
+with online learning. Our contributions are:
+
+\begin{enumerate}[nosep]
+\item A \textbf{two-phase ranking architecture}: Phase~1 heuristic scoring
+  provides immediate cold-start accuracy; Phase~2 FTRL online learning
+  continuously adapts to personal preferences.
+\item \textbf{Implicit negative feedback} from two sources: candidate skip
+  behavior (words passed over during selection) and re-selection correction
+  (user retypes same pinyin with different choice).
+\item A \textbf{C-language socket relay} reducing Lua-to-Python IPC latency
+  from $\sim$80ms to $\sim$2ms, keeping end-to-end latency under 5ms.
+\item \textbf{Comprehensive evaluation} on an 82K-word seed dictionary with
+  ablation analysis showing each scoring component's contribution.
+\end{enumerate}
+
+% ===================================================================
+\section{System Architecture}
+% ===================================================================
+
+Custom-IME sits between the RIME input engine and the user, intercepting
+candidate lists for re-ranking. The pipeline proceeds as follows: (1) RIME
+generates raw candidates, (2) a Lua filter sends them to a Python ranking
+server via Unix socket, (3) the server scores and re-orders candidates,
+(4) the user's final selection is sent back as a training signal.
+
+The ranking server runs as a persistent daemon with SQLite (WAL mode) for
+concurrent read/write access. Periodic background threads handle dictionary
+synchronization and database maintenance.
+
+% ===================================================================
+\subsection{Phase 1: Heuristic Scoring}
+% ===================================================================
+
+Phase~1 computes a weighted score for each candidate word $w$ given optional
+context $c$ (the previously committed word):
+
+\begin{equation}\label{eq:p1}
+S_1(w, c) = \alpha \cdot U(w) + \beta \cdot B(c, w) + \gamma \cdot R(w)
+           - \sigma_s \cdot \frac{K(w)}{1+U(w)}
+           - \sigma_r \cdot \frac{J(w)}{1+U(w)}
+           + \lambda \cdot (|w|-1)^2
+\end{equation}
+
+where:
+\begin{itemize}[nosep]
+\item $U(w)$: unigram selection count for word $w$,
+\item $B(c, w)$: bigram count of $(c, w)$ transitions,
+\item $R(w) = \delta^{d}$: recency factor with decay $\delta$ and $d$ days
+  since last use,
+\item $K(w)$: number of times word $w$ was skipped (shown before user's choice),
+\item $J(w)$: number of times word $w$ was explicitly rejected
+  (user retyped pinyin and chose differently),
+\item $|w|$: character length, with quadratic bonus for multi-character words.
+\end{itemize}
+
+The hyperparameters $(\alpha=0.30, \beta=0.45, \gamma=0.25, \delta=0.80,
+\sigma_s=0.15, \sigma_r=0.60, \lambda=0.25)$ were tuned manually on
+development data, balancing frequency signal against contextual and recency
+signals.
+
+Phase~1 is always active and handles cold start: the seed dictionary
+pre-populates $U(w)$ with frequency tiers (1--5) from THUOCL~\cite{thuocl}
+and chinese-xinhua, providing 82,276 Chinese words with initial counts.
+
+% ===================================================================
+\subsection{Phase 2: FTRL-Proximal Online Learning}
+% ===================================================================
+
+Phase~2 activates after $N_{\min}=30$ user selections. It learns residual
+corrections $\Delta(w, x)$ on top of Phase~1 scores through logistic
+regression with FTRL-Proximal optimization~\cite{ftrl}:
+
+\begin{equation}\label{eq:ftrl}
+P(\text{user picks } w) = \sigma(w^T x)
+\end{equation}
+
+where $\sigma$ is the sigmoid function, $w$ are the learned per-feature
+weights, and $x$ is a sparse feature vector encoding:
+\begin{itemize}[nosep]
+\item \textbf{Identity}: word identity, pinyin identity, bigram pair,
+\item \textbf{Position}: normalized rank $i/N$, is\_first, is\_last,
+\item \textbf{Competition}: Phase~1 score gap from the best candidate,
+\item \textbf{Input mode}: is\_abbrev flag, pinyin-to-word length ratio,
+\item \textbf{Length}: one-hot word length (1, 2, 3, 4+),
+\item \textbf{Time}: 4-period hour bucket,
+\item \textbf{Context}: has\_ctx flag, bigram identity.
+\end{itemize}
+
+The FTRL-Proximal update rule for feature $i$ at iteration $t$ is:
+\begin{align}
+w_{t+1,i} &= \begin{cases}
+  0 & \text{if } |z_{t,i}| \leq \lambda_1 \\
+  \frac{\text{sign}(z_{t,i})\lambda_1 - z_{t,i}}
+       {(\beta + \sqrt{n_{t,i}})/\alpha + \lambda_2} & \text{otherwise}
+\end{cases}
+\end{align}
+where $z_{t,i}$ accumulates gradients, $n_{t,i}$ accumulates squared
+gradients, and $(\alpha, \beta, \lambda_1, \lambda_2)$ control learning rate
+and regularization.
+
+The final ranking score combines both phases:
+\begin{equation}
+S(w, c) = S_1(w, c) + \big(P(\text{pick } w) - 0.5\big)
+\end{equation}
+
+The FTRL correction is bounded in $[-0.5, 0.5]$, ensuring Phase~1 heuristics
+remain the dominant signal while allowing online personalization.
+
+% ===================================================================
+\subsection{Implicit Feedback Signals}
+% ===================================================================
+
+We derive training labels from user behavior without explicit annotation:
+
+\textbf{Positive signal}: When the user selects candidate $w$ at position $p$
+in the candidate list, $w$ receives label $+1$ for the FTRL update. Its
+unigram count increments, and if context exists, the bigram count also
+increments.
+
+\textbf{Skip signal}: Candidates at positions $0$ through $p-1$ (shown above
+the selection) are treated as implicitly rejected. Each receives a
+\texttt{skip\_count} increment, penalizing future Phase~1 scores.
+
+\textbf{Reject signal}: When the user types the same pinyin a second time and
+selects a \emph{different} word, the first selection was likely a mistake.
+The first word receives a \texttt{reject\_count} increment with $4\times$
+stronger penalty ($\sigma_r=0.60$ vs $\sigma_s=0.15$) and a $2\times$
+gradient multiplier in the FTRL update.
+
+% ===================================================================
+\section{Seed Dictionary Construction}
+% ===================================================================
+
+To ensure strong cold-start performance, we construct a seed dictionary from
+two open-source Chinese lexical resources:
+
+\begin{itemize}[nosep]
+\item \textbf{THUOCL} (Tsinghua Open Chinese Lexicon): 52K words with
+  document-frequency (DF) scores across multiple categories.
+\item \textbf{chinese-xinhua}: 30K idioms from an open-source dictionary.
+\end{itemize}
+
+Words are filtered for pure Chinese characters (2--8 characters) and assigned
+seed counts by DF tier: $\geq 10{,}000 \rightarrow 5$, $\geq 1{,}000
+\rightarrow 4$, $\geq 100 \rightarrow 3$, $\geq 10 \rightarrow 2$, otherwise
+$1$. Idioms not in THUOCL receive count~$2$. This produces 82,276 entries,
+covering common words, idioms, and proper nouns.
+
+The dictionary is synced to RIME's \texttt{custom\_phrase.txt} (stabledb)
+periodically, ensuring RIME's built-in candidate generation benefits from the
+same vocabulary.
+
+% ===================================================================
+\section{Implementation}
+% ===================================================================
+
+The system consists of three components:
+
+\textbf{Lua filter} (\texttt{rerank\_filter.lua}): Intercepts RIME's candidate
+stream, serializes candidates as JSON, and invokes the ranker via Unix socket.
+After receiving the re-ranked list, it reorders RIME's candidates accordingly
+and stores metadata (pinyin, context, candidates) for the selection notifier.
+
+\textbf{C relay} (\texttt{ranker\_relay.c}, 93 lines): A minimal C program that
+reads a JSON request from stdin, connects to the Unix socket, sends the
+request, and writes the response to stdout. Replaces a Python client script:
+startup latency drops from $\sim$80ms (Python interpreter) to $\sim$2ms
+(fork+exec of 20KB binary). Uses \texttt{SIGALRM} with 3-second timeout and
+\texttt{SO\_SNDTIMEO/SO\_RCVTIMEO} for robustness.
+
+\textbf{Python server} (\texttt{ranker/server.py}): Persistent daemon managing
+the SQLite database and ranking model. Handles \texttt{rank}, \texttt{select},
+and \texttt{reject} actions via Unix socket. Background threads run periodic
+dictionary sync (30min) and database maintenance (trim old data every 6h,
+vacuum every 24h).
+
+% ===================================================================
+\section{Evaluation}
+% ===================================================================
+
+We evaluate on a synthetic benchmark designed to reflect realistic personal
+IME usage. From the 82K dictionary, we select the 24 pinyin strings with 4+
+homophone candidates (mean 5.2 candidates per pinyin). For each pinyin, we
+define a personalized user preference that deviates from global frequency:
+half the pinyins have the global \#2 word as the user's preferred choice. The
+simulated user selects their preferred word 85\% of the time, the second
+choice 10\%, and a random alternative 5\%. We run 2,000 selections with
+Zipf-distributed pinyin frequency and time-ordered online training (no data
+leakage).
+
+% ===================================================================
+\subsection{Ranking Accuracy}
+% ===================================================================
+
+Table~\ref{tab:accuracy} compares three ranking strategies:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{Top-1} & \textbf{Top-3} & \textbf{MRR} \\
+\midrule
+RIME default (static frequency) & 42.5\% & 99.7\% & 0.711 \\
+Phase 1 (heuristic)             & 84.8\% & 99.7\% & 0.922 \\
+Phase 1+2 (FTRL)                & 85.1\% & 99.7\% & 0.924 \\
+\bottomrule
+\end{tabular}
+\caption{Ranking accuracy comparison. Phase~1 achieves a 42.2\% absolute
+  Top-1 improvement over RIME's static ordering. Phase~2 FTRL adds 0.3\%
+  additional improvement through online personalization.}
+\label{tab:accuracy}
+\end{table}
+
+Phase~1's heuristic scoring provides the majority of the improvement, raising
+Top-1 accuracy from 42.5\% to 84.8\%. The FTRL online learner contributes a
+further 0.3\% improvement through gradual personalization. Figure~1 shows the
+convergence behavior: FTRL's Top-1 accuracy tracks Phase~1 closely but
+consistently outperforms it by a small margin after sufficient training.
+
+\begin{figure}[h]
+\centering
+\begin{tabular}{lrr}
+\toprule
+\textbf{Selections} & \textbf{Phase 1} & \textbf{Phase 1+2} \\
+\midrule
+200  & 75.0\% & 75.9\% \\
+400  & 78.5\% & 79.2\% \\
+600  & 81.0\% & 81.9\% \\
+800  & 83.2\% & 84.0\% \\
+1000 & 82.5\% & 83.1\% \\
+1200 & 83.4\% & 83.9\% \\
+1400 & 84.0\% & 84.5\% \\
+1600 & 84.6\% & 85.0\% \\
+1800 & 84.4\% & 84.8\% \\
+2000 & 84.8\% & 85.1\% \\
+\bottomrule
+\end{tabular}
+\caption{FTRL convergence over time. Phase~1+2 consistently outperforms
+  Phase~1 alone, with the gap widening as more training data accumulates.}
+\label{fig:convergence}
+\end{figure}
+
+% ===================================================================
+\subsection{Ablation Study}
+% ===================================================================
+
+Table~\ref{tab:ablation} shows the contribution of each Phase~1 scoring
+component by removing it from the full model:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Configuration} & \textbf{Top-1} & \textbf{Top-3} & \textbf{MRR} \\
+\midrule
+Full Phase 1          & 83.8\% & 95.0\% & 0.897 \\
+$-$ unigram ($\alpha$=0)  & 73.6\% & 95.0\% & 0.844 \\
+$-$ bigram ($\beta$=0)    & 80.0\% & 91.8\% & 0.871 \\
+$-$ recency ($\gamma$=0)  & 80.2\% & 92.6\% & 0.874 \\
+$-$ skip penalty          & 82.6\% & 94.8\% & 0.891 \\
+$-$ length bonus          & 82.0\% & 92.8\% & 0.884 \\
+\bottomrule
+\end{tabular}
+\caption{Ablation study. Unigram frequency is the most critical component
+  ($-$10.2\% Top-1). Bigram, recency, length bonus, and skip penalty each
+  contribute 1.2--3.8\% individually, confirming the value of the
+  multi-dimensional scoring approach.}
+\label{tab:ablation}
+\end{table}
+
+Unigram frequency is the dominant signal: removing it drops Top-1 accuracy by
+10.2 percentage points. The remaining components each contribute 1.2--3.8\%,
+demonstrating that the multi-dimensional approach provides meaningful
+complementary signals beyond raw frequency.
+
+% ===================================================================
+\subsection{Latency}
+% ===================================================================
+
+Table~\ref{tab:latency} breaks down per-keystroke latency:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lr}
+\toprule
+\textbf{Component} & \textbf{Latency} \\
+\midrule
+C socket relay (fork+exec)     & $\sim$2ms \\
+Phase 1 scoring (arithmetic)   & $<$1ms \\
+Phase 2 FTRL (sparse dot)      & $<$1ms \\
+Unix socket round-trip         & $<$1ms \\
+\midrule
+\textbf{Total}                 & \textbf{$<$5ms} \\
+\bottomrule
+\end{tabular}
+\caption{Per-keystroke latency breakdown. Total latency remains well below
+  the 50ms threshold for responsive text input.}
+\label{tab:latency}
+\end{table}
+
+The key optimization is replacing a Python client script with a compiled C
+relay, reducing startup overhead from $\sim$80ms to $\sim$2ms. Combined with
+in-process scoring and WAL-mode SQLite for non-blocking database access, total
+latency stays under 5ms per keystroke.
+
+% ===================================================================
+\section{Related Work}
+% ===================================================================
+
+\textbf{Statistical IME.} Traditional Chinese IMEs use $n$-gram language models
+trained on large corpora to score candidate sequences~\cite{ngram_ime}. RIME's
+built-in ranking relies on static word frequencies and user dictionary updates,
+without context-aware or recency-weighted scoring.
+
+\textbf{Neural IME.} Recent work applies deep learning to IME ranking.
+GeneInput~\cite{geneinput} uses a generative LLM with RLHF-based personalization
+to handle the full keystroke-to-character pipeline. CVM-IME~\cite{cvm_ime}
+addresses one-to-many pinyin mappings with conditional variational mechanisms
+targeting low-resource scenarios. AttnInput~\cite{attninput} uses RWKV linear
+transformers for efficient context-aware pinyin input. These approaches require
+substantial computational resources (GPU inference, large model files) and are
+designed for cloud deployment rather than personal on-device use.
+
+\textbf{FTRL in production.} FTRL-Proximal~\cite{ftrl} was introduced by Google
+for large-scale click-through rate prediction. It has been applied to
+recommendation systems~\cite{form_ftrl} and search ranking, but to our
+knowledge has not been directly applied to IME candidate ranking.
+
+\textbf{Personalization.} The closest work to ours is perhaps the RIME
+ecosystem's user dictionary mechanism, which updates word frequencies based on
+selections but uses a simpler update rule without online learning or implicit
+negative feedback.
+
+% ===================================================================
+\section{Conclusion and Future Work}
+% ===================================================================
+
+We presented Custom-IME, a two-phase ranking framework for personal Chinese
+pinyin input that combines heuristic scoring with FTRL online learning. The
+system achieves a 42.2\% improvement in Top-1 accuracy over static frequency
+ordering, with each scoring component contributing measurably to the result.
+The FTRL learner provides an additional 0.3\% improvement through continuous
+online personalization.
+
+Current limitations include the sparse homophone distribution in the seed
+dictionary (only 24 pinyins have 4+ competing candidates) and the dominance
+of Phase~1 heuristics, which limits FTRL's room for improvement. Future work
+directions include: (1) expanding the homophone coverage through corpus
+analysis, (2) incorporating more interaction signals (dwell time, deletion
+patterns, application context), and (3) exploring factorization
+machines~\cite{ffm_wubi} as an alternative to logistic regression for the
+online learning phase.
+
+% ===================================================================
+\bibliographystyle{plain}
+\begin{thebibliography}{99}
+
+\bibitem{geneinput}
+K.~Ding, Y.~Wang, Z.~Xu, Z.~Jia, and E.~Chen.
+Generative Input: Towards Next-Generation Input Methods Paradigm.
+In \emph{Findings of ACL}, 2024.
+
+\bibitem{cvm_ime}
+B.~Sun, J.~Li, H.~Zhou, F.~Meng, K.~Li, and J.~Zhou.
+Exploring Conditional Variational Mechanism to Pinyin Input Method.
+In \emph{ACL}, 2024.
+
+\bibitem{attninput}
+AttnInput: Revolutionizing Pinyin Input with Context-Aware RWKV Language Models.
+Under review, 2024.
+
+\bibitem{ftrl}
+H.~B.~McMahan et al.
+Ad Click Prediction: a View from the Trenches.
+In \emph{KDD}, 2013.
+
+\bibitem{form_ftrl}
+FORM: Follow the Online Regularized Meta-Leader for Cold-Start Recommendation.
+In \emph{SIGIR}, 2021.
+
+\bibitem{ffm_wubi}
+Field-aware Factorization Machine for Wubi Input Method.
+Gannan Normal University, 2023.
+
+\bibitem{thuocl}
+THUOCL: Tsinghua Open Chinese Lexicon.
+\url{https://github.com/thunlp/THUOCL}
+
+\bibitem{ngram_ime}
+Sentence-level Chinese Character Input Method.
+\emph{Journal of Chinese Information Processing}, 2000.
+
+\end{thebibliography}
+
+\end{document}

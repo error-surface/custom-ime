@@ -7,3 +7,4 @@ __pycache__/
 *.db
 .worktrees/
 scripts/ranker_relay
+.DS_Store

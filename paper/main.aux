@@ -1,0 +1,47 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand*\HyPL@Entry[1]{}
+\citation{geneinput}
+\HyPL@Entry{0<</S/D>>}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{thuocl}
+\citation{ftrl}
+\@writefile{toc}{\contentsline {section}{\numberline {2}System Architecture}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Phase 1: Heuristic Scoring}{2}{subsection.2.1}\protected@file@percent }
+\newlabel{eq:p1}{{1}{2}{Phase 1: Heuristic Scoring}{equation.2.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Phase 2: FTRL-Proximal Online Learning}{2}{subsection.2.2}\protected@file@percent }
+\newlabel{eq:ftrl}{{2}{2}{Phase 2: FTRL-Proximal Online Learning}{equation.2.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Implicit Feedback Signals}{3}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Seed Dictionary Construction}{3}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Implementation}{3}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Evaluation}{4}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Ranking Accuracy}{4}{subsection.5.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Ranking accuracy comparison. Phase~1 achieves a 42.2\% absolute Top-1 improvement over RIME's static ordering. Phase~2 FTRL adds 0.3\% additional improvement through online personalization.}}{4}{table.1}\protected@file@percent }
+\newlabel{tab:accuracy}{{1}{4}{Ranking accuracy comparison. Phase~1 achieves a 42.2\% absolute Top-1 improvement over RIME's static ordering. Phase~2 FTRL adds 0.3\% additional improvement through online personalization}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Ablation Study}{4}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Latency}{4}{subsection.5.3}\protected@file@percent }
+\citation{ngram_ime}
+\citation{geneinput}
+\citation{cvm_ime}
+\citation{attninput}
+\citation{ftrl}
+\citation{form_ftrl}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces FTRL convergence over time. Phase~1+2 consistently outperforms Phase~1 alone, with the gap widening as more training data accumulates.}}{5}{figure.1}\protected@file@percent }
+\newlabel{fig:convergence}{{1}{5}{FTRL convergence over time. Phase~1+2 consistently outperforms Phase~1 alone, with the gap widening as more training data accumulates}{figure.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Ablation study. Unigram frequency is the most critical component ($-$10.2\% Top-1). Bigram, recency, length bonus, and skip penalty each contribute 1.2--3.8\% individually, confirming the value of the multi-dimensional scoring approach.}}{5}{table.2}\protected@file@percent }
+\newlabel{tab:ablation}{{2}{5}{Ablation study. Unigram frequency is the most critical component ($-$10.2\% Top-1). Bigram, recency, length bonus, and skip penalty each contribute 1.2--3.8\% individually, confirming the value of the multi-dimensional scoring approach}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Related Work}{5}{section.6}\protected@file@percent }
+\citation{ffm_wubi}
+\bibstyle{plain}
+\bibcite{geneinput}{1}
+\bibcite{cvm_ime}{2}
+\bibcite{attninput}{3}
+\bibcite{ftrl}{4}
+\bibcite{form_ftrl}{5}
+\bibcite{ffm_wubi}{6}
+\bibcite{thuocl}{7}
+\bibcite{ngram_ime}{8}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Per-keystroke latency breakdown. Total latency remains well below the 50ms threshold for responsive text input.}}{6}{table.3}\protected@file@percent }
+\newlabel{tab:latency}{{3}{6}{Per-keystroke latency breakdown. Total latency remains well below the 50ms threshold for responsive text input}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion and Future Work}{6}{section.7}\protected@file@percent }
+\gdef \@abspage@last{6}
