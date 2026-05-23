@@ -123,6 +123,7 @@ class RankerServer:
                 pinyin=request["pinyin"],
                 context=request.get("context", ""),
                 candidates=request["candidates"],
+                context2=request.get("context2", ""),
             )
             return {"ranked": ranked}
         elif action == "select":
@@ -132,6 +133,7 @@ class RankerServer:
                 chosen=request["chosen"],
                 candidates=request["candidates"],
                 position=request.get("position", 0),
+                context2=request.get("context2", ""),
             )
             # Incremental sync: immediately persist to custom_phrase.txt
             try:
@@ -145,6 +147,7 @@ class RankerServer:
                 context=request.get("context", ""),
                 rejected=request["rejected"],
                 candidates=request.get("candidates", []),
+                context2=request.get("context2", ""),
             )
             return {"status": "ok"}
         else:

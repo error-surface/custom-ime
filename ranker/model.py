@@ -2,7 +2,7 @@ import math
 import time
 from pathlib import Path
 
-from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, REJECT_PENALTY, LENGTH_BONUS, LAST_PINYIN_BOOST, FTRL_WEIGHTS_PATH
+from ranker.config import ALPHA, GAMMA, DECAY, SKIP_PENALTY, REJECT_PENALTY, LENGTH_BONUS, LAST_PINYIN_BOOST, LAMBDA_INIT, BACKOFF_K_MIN, DISCOUNT, FTRL_WEIGHTS_PATH
 from ranker.db import SelectionDB
 from ranker.local_ranker import FTRLRanker, MIN_SAMPLES
 
@@ -19,36 +19,8 @@ class RankingModel:
             return 2
         return 1
 
-    def rank(self, pinyin: str, context: str, candidates: list) -> list:
-        if not candidates:
-            return []
-
-        # Phase 1: heuristic scores (always used, handles cold start)
-        p1_scores = {c: self._score_phase1(c, context, pinyin) for c in candidates}
-        max_p1 = max(p1_scores.values()) if p1_scores else 0.0
-
-        # Phase 2: blend FTRL corrections on top of Phase 1
-        if self._ftrl.ready:
-            scored = []
-            for i, c in enumerate(candidates):
-                p1 = p1_scores[c]
-                ftrl_prob = self._ftrl.predict(
-                    c, context, i, len(candidates), phase1_score=p1,
-                    max_phase1=max_p1, pinyin=pinyin,
-                )
-                # FTRL correction: boost (prob > 0.5) or penalize (prob < 0.5)
-                # The adjustment is modest so Phase 1 heuristics still dominate
-                adjustment = ftrl_prob - 0.5
-                scored.append((c, p1 + adjustment))
-        else:
-            scored = [(c, p1_scores[c]) for c in candidates]
-
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return [c for c, _ in scored]
-
-    def _score_phase1(self, word: str, context: str, pinyin: str = "") -> float:
+    def _emission_score(self, word: str, pinyin: str = "") -> float:
         unigram = self._db.get_unigram_freq(word)
-        bigram = self._db.get_bigram_freq(context, word) if context else 0
         skip_count = self._db.get_skip_count(word)
         reject_count = self._db.get_reject_count(word)
         last_used = self._db.get_last_used(word)
@@ -60,27 +32,80 @@ class RankingModel:
         reject_penalty = REJECT_PENALTY * reject_count / (1 + unigram)
         extra = max(0, len(word) - 1)
         length_bonus = LENGTH_BONUS * (extra ** 2)
-        score = ALPHA * unigram + BETA * bigram + GAMMA * recency - skip_penalty - reject_penalty + length_bonus
+        score = (ALPHA * unigram + GAMMA * recency
+                 - skip_penalty - reject_penalty + length_bonus)
         if pinyin and word == self._db.get_last_chosen_for_pinyin(pinyin):
             score += LAST_PINYIN_BOOST
         return score
 
-    def record(self, pinyin: str, context: str, chosen: str,
-               candidates: list, position: int):
-        self._db.record_selection(pinyin, context, chosen, candidates, position)
+    def _transition_score(self, word: str, context: str, context2: str = "") -> float:
+        # Try trigram
+        if context2 and context:
+            tri_count = self._db.get_trigram_freq(context2, context, word)
+            if tri_count >= BACKOFF_K_MIN:
+                total = self._db.get_trigram_total(context2, context)
+                p = max(tri_count - DISCOUNT, 0.1) / max(total, 1)
+                return math.log(max(p, 1e-10))
 
-        # Online FTRL update with Phase 1 scores as features
+        # Try bigram
+        if context:
+            bi_count = self._db.get_bigram_freq(context, word)
+            if bi_count >= BACKOFF_K_MIN:
+                total = self._db.get_bigram_total(context)
+                p = max(bi_count - DISCOUNT, 0.1) / max(total, 1)
+                return math.log(max(p, 1e-10))
+
+        # Fall back to unigram
+        uni_count = self._db.get_unigram_freq(word)
+        total = self._db.get_unigram_total()
+        p = max(uni_count, 0.1) / max(total, 1)
+        return math.log(max(p, 1e-10))
+
+    def _score_phase1(self, word: str, context: str, pinyin: str = "") -> float:
+        """Deprecated: kept for eval backward compat."""
+        return self._emission_score(word, pinyin) + LAMBDA_INIT * self._transition_score(word, context)
+
+    def rank(self, pinyin: str, context: str, candidates: list,
+             context2: str = "") -> list:
+        if not candidates:
+            return []
+
+        emissions = {c: self._emission_score(c, pinyin) for c in candidates}
+        transitions = {c: self._transition_score(c, context, context2) for c in candidates}
+
+        if self._ftrl.ready:
+            scored = []
+            for i, c in enumerate(candidates):
+                ftrl_score = self._ftrl.predict(
+                    c, context, i, len(candidates),
+                    emission=emissions[c],
+                    markov_logp=transitions[c],
+                    pinyin=pinyin,
+                )
+                scored.append((c, emissions[c] + ftrl_score))
+        else:
+            scored = [(c, emissions[c] + LAMBDA_INIT * transitions[c])
+                      for c in candidates]
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [c for c, _ in scored]
+
+    def record(self, pinyin: str, context: str, chosen: str,
+               candidates: list, position: int, context2: str = ""):
+        self._db.record_selection(pinyin, context, chosen, candidates, position, context2)
+
         if len(candidates) > 0:
-            p1_scores = {c: self._score_phase1(c, context, pinyin) for c in candidates}
+            emissions = {c: self._emission_score(c, pinyin) for c in candidates}
+            transitions = {c: self._transition_score(c, context, context2) for c in candidates}
             self._ftrl.update(chosen, context, candidates, position,
-                              phase1_scores=p1_scores, pinyin=pinyin)
+                              emissions=emissions, markov_logps=transitions, pinyin=pinyin)
 
     def reject(self, pinyin: str, context: str, rejected: str,
-               candidates: list = None):
+               candidates: list = None, context2: str = ""):
         self._db.record_reject(rejected)
 
-        # Negative FTRL update: treat rejected word as negative example
         if candidates and len(candidates) > 0:
-            p1_scores = {c: self._score_phase1(c, context, pinyin) for c in candidates}
+            emissions = {c: self._emission_score(c, pinyin) for c in candidates}
+            transitions = {c: self._transition_score(c, context, context2) for c in candidates}
             self._ftrl.update_reject(rejected, context, candidates,
-                                     phase1_scores=p1_scores, pinyin=pinyin)
+                                     emissions=emissions, markov_logps=transitions, pinyin=pinyin)
