@@ -39,11 +39,13 @@ local function rerank_filter(input, env)
     local ctx = env.engine.context
     local context = ctx:get_commit_text() or ""
     local pinyin = ctx.input or ""
+    local context2 = ctx:get_property and (ctx:get_property("custom_ime.prev_word2") or "") or ""
     local cand_json = json_helper.encode(candidates)
     local request = json_helper.encode({
         action = "rank",
         pinyin = pinyin,
         context = context,
+        context2 = context2,
         candidates = candidates,
     })
 

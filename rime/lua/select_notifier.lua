@@ -58,6 +58,16 @@ local function select_notifier(env)
 
         -- Update previous word for next commit.
         env.prev_word = text
+
+        -- Track second-to-last word for trigram context
+        env.prev_word2 = env.prev_word2 or ""
+        if env.prev_word and env.prev_word ~= "" then
+            env.prev_word2 = env.prev_word
+        end
+
+        if ctx.set_property then
+            ctx:set_property("custom_ime.prev_word2", env.prev_word2 or "")
+        end
     end)
 end
 
