@@ -36,6 +36,13 @@ class SelectionDB:
                 count INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (prev_word, curr_word)
             );
+            CREATE TABLE IF NOT EXISTS trigram_freq (
+                prev2_word TEXT NOT NULL,
+                prev1_word TEXT NOT NULL,
+                curr_word  TEXT NOT NULL,
+                count      INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (prev2_word, prev1_word, curr_word)
+            );
             CREATE TABLE IF NOT EXISTS pinyin_last_chosen (
                 pinyin TEXT PRIMARY KEY,
                 word TEXT NOT NULL,
@@ -55,7 +62,7 @@ class SelectionDB:
         self._conn.commit()
 
     def record_selection(self, pinyin: str, context: str, chosen: str,
-                         candidates: list, position: int):
+                         candidates: list, position: int, context2: str = ""):
         now = time.time()
         self._conn.execute(
             "INSERT INTO selections (pinyin, context, chosen, candidates, position, timestamp) "
@@ -82,6 +89,14 @@ class SelectionDB:
                 "ON CONFLICT(prev_word, curr_word) DO UPDATE SET count = count + 1",
                 (context, chosen),
             )
+        if context2 and context:
+            self._conn.execute(
+                "INSERT INTO trigram_freq (prev2_word, prev1_word, curr_word, count) "
+                "VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(prev2_word, prev1_word, curr_word) "
+                "DO UPDATE SET count = count + 1",
+                (context2, context, chosen),
+            )
         self._conn.execute(
             "INSERT INTO pinyin_last_chosen (pinyin, word, timestamp) VALUES (?, ?, ?) "
             "ON CONFLICT(pinyin) DO UPDATE SET word = excluded.word, timestamp = excluded.timestamp",
@@ -105,6 +120,30 @@ class SelectionDB:
             (prev_word, curr_word),
         ).fetchone()
         return row[0] if row else 0
+
+    def get_trigram_freq(self, prev2: str, prev1: str, word: str) -> int:
+        row = self._conn.execute(
+            "SELECT count FROM trigram_freq WHERE prev2_word = ? AND prev1_word = ? AND curr_word = ?",
+            (prev2, prev1, word),
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_bigram_total(self, prev_word: str) -> int:
+        row = self._conn.execute(
+            "SELECT SUM(count) FROM bigram_freq WHERE prev_word = ?", (prev_word,)
+        ).fetchone()
+        return row[0] if row and row[0] else 0
+
+    def get_trigram_total(self, prev2: str, prev1: str) -> int:
+        row = self._conn.execute(
+            "SELECT SUM(count) FROM trigram_freq WHERE prev2_word = ? AND prev1_word = ?",
+            (prev2, prev1),
+        ).fetchone()
+        return row[0] if row and row[0] else 0
+
+    def get_unigram_total(self) -> int:
+        row = self._conn.execute("SELECT SUM(count) FROM unigram_freq").fetchone()
+        return row[0] if row and row[0] else 0
 
     def get_skip_count(self, word: str) -> int:
         row = self._conn.execute(

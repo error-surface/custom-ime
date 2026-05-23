@@ -43,3 +43,32 @@ def test_get_all_selections(db):
     assert len(rows) == 2
     assert rows[0]["pinyin"] == "ni"
     assert rows[1]["context"] == "你"
+
+
+def test_trigram_frequency(db):
+    db.record_selection("nihao", "你", "你好", ["你好"], 0, context2="们")
+    db.record_selection("nihao", "你", "你好", ["你好"], 0, context2="们")
+    db.record_selection("nihao", "你", "你好", ["你好"], 0, context2="我")
+    assert db.get_trigram_freq("们", "你", "你好") == 2
+    assert db.get_trigram_freq("我", "你", "你好") == 1
+    assert db.get_trigram_freq("他", "你", "你好") == 0
+
+
+def test_unigram_total(db):
+    db.record_selection("a", "", "你", ["你"], 0)
+    db.record_selection("b", "", "好", ["好"], 0)
+    assert db.get_unigram_total() == 2
+
+
+def test_bigram_total(db):
+    db.record_selection("a", "我", "你", ["你"], 0)
+    db.record_selection("b", "我", "好", ["好"], 0)
+    assert db.get_bigram_total("我") == 2
+    assert db.get_bigram_total("他") == 0
+
+
+def test_trigram_total(db):
+    db.record_selection("a", "你", "好", ["好"], 0, context2="我")
+    db.record_selection("b", "你", "好", ["好"], 0, context2="我")
+    assert db.get_trigram_total("我", "你") == 2
+    assert db.get_trigram_total("他", "你") == 0
