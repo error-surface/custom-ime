@@ -29,13 +29,12 @@ def test_rank_with_unigram_history(model, db):
 
 
 def test_rank_with_bigram_boost(model, db):
-    db.record_selection("hao", "你", "好", ["好", "号", "毫"], 0)
-    db.record_selection("hao", "你", "好", ["好", "号", "毫"], 0)
-    db.record_selection("hao", "你", "好", ["好", "号", "毫"], 0)
-    db.record_selection("hao", "", "号", ["好", "号", "毫"], 1)
-    db.record_selection("hao", "", "号", ["好", "号", "毫"], 1)
-    db.record_selection("hao", "", "号", ["好", "号", "毫"], 1)
-    db.record_selection("hao", "", "号", ["好", "号", "毫"], 1)
+    # Record selections with context "你" → "好" to build bigram data
+    for _ in range(10):
+        db.record_selection("hao", "你", "好", ["好", "号", "毫"], 0)
+    for _ in range(3):
+        db.record_selection("hao", "", "号", ["好", "号", "毫"], 1)
+    # With strong bigram "你"→"好", "好" should rank first when context="你"
     ranked = model.rank("hao", "你", ["好", "号", "毫"])
     assert ranked[0] == "好"
 

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from ranker.db import SelectionDB
 from ranker.local_ranker import MIN_SAMPLES
 from ranker.model import RankingModel
-from ranker.config import ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS
+from ranker.config import ALPHA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS, LAMBDA_INIT
 
 DICT_PATH = Path(__file__).resolve().parent.parent / "ranker" / "dictionary_data.json"
 
@@ -125,7 +125,7 @@ def main():
         rime_res.append((rime_order.index(chosen), len(cand_words)))
 
         # Phase 1
-        p1_scores = {c: model._score_phase1(c, "") for c in cand_words}
+        p1_scores = {c: model._emission_score(c, "") for c in cand_words}
         p1_order = sorted(cand_words, key=lambda c: p1_scores[c], reverse=True)
         p1_res.append((p1_order.index(chosen), len(cand_words)))
 
@@ -135,8 +135,9 @@ def main():
             p2_res.append((p2_order.index(chosen), len(cand_words)))
 
         # Train after prediction
-        s = {c: model._score_phase1(c, "") for c in cand_words}
-        model._ftrl.update(chosen, "", cand_words, 0, phase1_scores=s, pinyin=py)
+        emissions = {c: model._emission_score(c, "") for c in cand_words}
+        transitions = {c: model._transition_score(c, "") for c in cand_words}
+        model._ftrl.update(chosen, "", cand_words, 0, emissions=emissions, markov_logps=transitions, pinyin=py)
         db_all.record_selection(py, "", chosen, cand_words, 0)
 
         if (rnd + 1) % 200 == 0:
@@ -174,18 +175,18 @@ def main():
     print("-" * 50)
 
     ablations = [
-        ("Full Phase 1", ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS),
-        ("- unigram (α=0)", 0.0, BETA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS),
-        ("- bigram (β=0)", ALPHA, 0.0, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS),
-        ("- recency (γ=0)", ALPHA, BETA, 0.0, DECAY, SKIP_PENALTY, LENGTH_BONUS),
-        ("- skip penalty", ALPHA, BETA, GAMMA, DECAY, 0.0, LENGTH_BONUS),
-        ("- length bonus", ALPHA, BETA, GAMMA, DECAY, SKIP_PENALTY, 0.0),
+        ("Full Phase 1", ALPHA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS, LAMBDA_INIT),
+        ("- unigram (α=0)", 0.0, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS, LAMBDA_INIT),
+        ("- recency (γ=0)", ALPHA, 0.0, DECAY, SKIP_PENALTY, LENGTH_BONUS, LAMBDA_INIT),
+        ("- skip penalty", ALPHA, GAMMA, DECAY, 0.0, LENGTH_BONUS, LAMBDA_INIT),
+        ("- length bonus", ALPHA, GAMMA, DECAY, SKIP_PENALTY, 0.0, LAMBDA_INIT),
+        ("- markov (λ=0)", ALPHA, GAMMA, DECAY, SKIP_PENALTY, LENGTH_BONUS, 0.0),
     ]
 
     print(f"  {'Configuration':<25} {'Top-1':>8} {'Top-3':>8} {'MRR':>8}")
     print(f"  {'-' * 49}")
 
-    for name, a, b, g, d, sp, lb in ablations:
+    for name, a, g, d, sp, lb, lam in ablations:
         db_a = SelectionDB(Path(tempfile.mkdtemp()) / "abl.db")
         seed(db_a, [(w, c) for py, entries in test_pinyins for w, c in entries])
 
@@ -208,7 +209,6 @@ def main():
             scores = {}
             for c in cand_words:
                 uni = db_a.get_unigram_freq(c)
-                big = db_a.get_bigram_freq("", c)
                 skip = db_a.get_skip_count(c)
                 lu = db_a.get_last_used(c)
                 rec = 0.0
@@ -217,7 +217,11 @@ def main():
                 sp_val = sp * skip / (1 + uni)
                 extra = max(0, len(c) - 1)
                 lb_val = lb * (extra ** 2)
-                scores[c] = a * uni + b * big + g * rec - sp_val + lb_val
+                emission = a * uni + g * rec - sp_val + lb_val
+                # Markov transition (unigram-only since context is empty)
+                uni_total = max(db_a.get_unigram_total(), 1)
+                trans = math.log(max(max(uni, 0.1) / uni_total, 1e-10))
+                scores[c] = emission + lam * trans
 
             order = sorted(cand_words, key=lambda c: scores[c], reverse=True)
             results.append((order.index(chosen), len(cand_words)))
