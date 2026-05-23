@@ -50,20 +50,21 @@ local function select_notifier(env)
             action = "select",
             pinyin = pinyin,
             context = context,
+            context2 = env.prev_word2 or "",
             chosen = text,
             candidates = candidates,
             position = pos,
         })
         send_fire_and_forget(request)
 
-        -- Update previous word for next commit.
-        env.prev_word = text
-
-        -- Track second-to-last word for trigram context
+        -- Track second-to-last word for trigram context (before updating prev_word)
         env.prev_word2 = env.prev_word2 or ""
         if env.prev_word and env.prev_word ~= "" then
             env.prev_word2 = env.prev_word
         end
+
+        -- Update previous word for next commit.
+        env.prev_word = text
 
         if ctx.set_property then
             ctx:set_property("custom_ime.prev_word2", env.prev_word2 or "")
