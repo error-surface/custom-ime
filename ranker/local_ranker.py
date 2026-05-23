@@ -39,17 +39,16 @@ class FTRLRanker:
         return self._update_count >= MIN_SAMPLES
 
     def _featurize(self, word, context, position, n_candidates,
-                   phase1_score=0.0, max_phase1=0.0, pinyin=""):
-        """Sparse features.  phase1_score lets FTRL learn residuals."""
+                   emission=0.0, markov_logp=0.0, pinyin=""):
+        """Sparse features.  emission and markov_logp let FTRL learn residuals."""
         feats = {
             "bias": 1.0,
             "len": len(word),
             "n_cands": n_candidates,
             "pos_norm": position / max(n_candidates, 1),
-            "phase1": phase1_score,
+            "emission": emission,
+            "markov_logp": markov_logp,
         }
-        # Homophone competition: how far behind the group leader
-        feats["phase1_gap"] = phase1_score - max_phase1
         # Word length one-hot (1, 2, 3, 4+)
         feats[f"wlen_{min(len(word), 4)}"] = 1.0
         # RIME's original ordering is a strong signal
@@ -93,25 +92,26 @@ class FTRLRanker:
         return _safe_sigmoid(wTx)
 
     def predict(self, word, context, position, n_candidates,
-                phase1_score=0.0, max_phase1=0.0, pinyin=""):
+                emission=0.0, markov_logp=0.0, pinyin=""):
         """Return probability [0, 1] that this candidate is the right one."""
         feats = self._featurize(word, context, position, n_candidates,
-                                phase1_score, max_phase1, pinyin)
+                                emission, markov_logp, pinyin)
         return self._score(feats)
 
     def update(self, chosen, context, candidates, position,
-               phase1_scores=None, pinyin=""):
+               emissions=None, markov_logps=None, pinyin=""):
         """Online update after a user selection.
 
-        phase1_scores: dict of word→Phase1 score, used as features.
+        emissions: dict of word→emission score, used as features.
+        markov_logps: dict of word→markov log probability, used as features.
         """
-        p1 = phase1_scores or {}
-        max_p1 = max(p1.values()) if p1 else 0.0
+        em = emissions or {}
+        ml = markov_logps or {}
         for i, c in enumerate(candidates):
             feats = self._featurize(
                 c, context, i, len(candidates),
-                phase1_score=p1.get(c, 0.0),
-                max_phase1=max_p1,
+                emission=em.get(c, 0.0),
+                markov_logp=ml.get(c, 0.0),
                 pinyin=pinyin,
             )
             label = 1.0 if c == chosen else 0.0
@@ -128,19 +128,19 @@ class FTRLRanker:
         self._save()
 
     def update_reject(self, rejected, context, candidates,
-                      phase1_scores=None, pinyin=""):
+                      emissions=None, markov_logps=None, pinyin=""):
         """Stronger negative update when user explicitly rejects a word.
 
         The rejected word gets label=0 with 2x gradient weight.
         Other candidates get label=0 normally (we don't know which is correct).
         """
-        p1 = phase1_scores or {}
-        max_p1 = max(p1.values()) if p1 else 0.0
+        em = emissions or {}
+        ml = markov_logps or {}
         for i, c in enumerate(candidates):
             feats = self._featurize(
                 c, context, i, len(candidates),
-                phase1_score=p1.get(c, 0.0),
-                max_phase1=max_p1,
+                emission=em.get(c, 0.0),
+                markov_logp=ml.get(c, 0.0),
                 pinyin=pinyin,
             )
             label = 0.0  # all are negative in a rejection event
