@@ -8,6 +8,15 @@ else
     echo "Squirrel already installed."
 fi
 
+# Install HanaMin font for CJK Extension B+ character support.
+# Without this, rare characters in Rime's luna_pinyin dictionary render as tofu blocks.
+if ! ls "$HOME/Library/Fonts/HanaMinB.ttf" &>/dev/null; then
+    brew install font-hanamin
+    echo "HanaMin font installed for CJK Extension B+ coverage."
+else
+    echo "HanaMin font already installed."
+fi
+
 RIME_DIR="$HOME/Library/Rime"
 mkdir -p "$RIME_DIR/lua" "$RIME_DIR/scripts"
 

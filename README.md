@@ -28,16 +28,17 @@ Keystrokes → RIME → Candidate List
 
 | Phase | Trigger | Model |
 |-------|---------|-------|
-| Phase 1 | Immediately | Unigram frequency + bigram context + recency decay + length bonus − skip penalty |
-| Phase 2 | After 30 selections | FTRL-Proximal online logistic regression, learns residual corrections on top of Phase 1 |
+| Phase 1 | Immediately | Emission score (unigram + recency + length bonus − skip/reject penalties) + Markov n-gram transition probability (3-gram → 2-gram → 1-gram Katz backoff) |
+| Phase 2 | After 30 selections | FTRL-Proximal online logistic regression, learns a weight λ on the transition score plus residual corrections |
 
-Both phases always contribute — Phase 2 blends in as a modest adjustment rather than replacing Phase 1. Phase 2 features include candidate position, word length, time-of-day bucket, and the Phase 1 score itself (so FTRL learns where the heuristics are wrong).
+Both phases always contribute — Phase 2 blends in as a modest adjustment rather than replacing Phase 1. Phase 2 features include emission score, Markov log-probability, candidate position, word length, time-of-day bucket, and other sparse signals. The transition weight λ is learned online, growing as n-gram data accumulates.
 
 ## Requirements
 
 - macOS 12+
 - Python 3.9+
 - Homebrew
+- [HanaMin](https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/font/font-h/font-hanamin.rb) font (CJK Extension B+ coverage; installed automatically by `install.sh`)
 
 ## Installation
 
@@ -111,10 +112,10 @@ Avg position:     0.41
 ```
 custom-ime/
 ├── ranker/
-│   ├── config.py           # Paths, hyperparameters
-│   ├── db.py               # SQLite layer: selection log, unigram/bigram tables
+│   ├── config.py           # Paths, hyperparameters (emission weights + Markov n-gram)
+│   ├── db.py               # SQLite layer: selection log, unigram/bigram/trigram tables
 │   ├── local_ranker.py     # FTRL-Proximal online learner (Phase 2)
-│   ├── model.py            # Phase 1 heuristic scoring + Phase 2 FTRL blend
+│   ├── model.py            # Emission scoring + Markov n-gram transition + FTRL blend
 │   ├── seed_data.py        # 82K-word built-in vocabulary for cold start
 │   ├── server.py           # Unix socket server handling rank/select actions
 │   ├── sync_phrases.py     # Sync learned phrases to Rime's custom_phrase.txt
@@ -149,7 +150,7 @@ All runtime data is stored in `~/.local/share/custom-ime/`:
 
 | File | Contents |
 |------|----------|
-| `selections.db` | Selection log, unigram and bigram frequency tables |
+| `selections.db` | Selection log, unigram/bigram/trigram frequency tables |
 | `ftrl_weights.json` | Serialized FTRL model weights (Phase 2) |
 | `ranker.sock` | Unix Domain Socket (runtime only) |
 
@@ -166,13 +167,15 @@ Edit `ranker/config.py` to tune the model behavior:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ALPHA` | `0.30` | Weight for unigram frequency |
-| `BETA` | `0.45` | Weight for bigram context |
-| `GAMMA` | `0.25` | Weight for recency |
+| `ALPHA` | `0.30` | Weight for unigram frequency (emission) |
+| `GAMMA` | `0.25` | Weight for recency (emission) |
 | `DECAY` | `0.80` | Recency decay factor per day |
 | `SKIP_PENALTY` | `0.15` | Penalty per skip (candidates passed over) |
 | `REJECT_PENALTY` | `0.60` | Penalty for explicitly rejected words |
 | `LENGTH_BONUS` | `0.25` | Quadratic bonus for multi-character words |
+| `LAMBDA_INIT` | `0.50` | Initial weight for Markov n-gram transition (FTRL learns the true λ) |
+| `BACKOFF_K_MIN` | `3` | Minimum count before backing off to lower-order n-gram |
+| `DISCOUNT` | `0.5` | Absolute discount for Katz smoothing |
 
 ## Smoke Test
 
@@ -234,16 +237,17 @@ RIME 负责拼音解析和候选词生成。Lua 过滤器拦截候选词列表�
 
 | 阶段 | 触发条件 | 模型 |
 |------|---------|------|
-| 第一阶段 | 即刻生效 | 词频 + 二元上下文 + 时间衰减 + 长度加成 − 跳过惩罚 |
-| 第二阶段 | 30 次选择后 | FTRL-Proximal 在线逻辑回归，在第一阶段基础上学习残差修正 |
+| 第一阶段 | 即刻生效 | 发射分数 (词频 + 时间衰减 + 长度加成 − 跳过/拒绝惩罚) + Markov n-gram 转移概率 (3-gram → 2-gram → 1-gram Katz 回退) |
+| 第二阶段 | 30 次选择后 | FTRL-Proximal 在线逻辑回归，学习转移权重 λ 和残差修正 |
 
-两个阶段始终共同作用——第二阶段以适度调整的方式融入，而非替代第一阶段。第二阶段特征包括候选词位置、词长、时段分桶以及第一阶段得分本身（让 FTRL 学到启发式方法在哪里出错）。
+两个阶段始终共同作用——第二阶段以适度调整的方式融入，而非替代第一阶段。第二阶段特征包括发射分数、Markov 对数概率、候选词位置、词长、时段分桶及其他稀疏信号。转移权重 λ 在线学习，随 n-gram 数据积累自动增强。
 
 ## 环境要求
 
 - macOS 12+
 - Python 3.9+
 - Homebrew
+- [HanaMin](https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/font/font-h/font-hanamin.rb) font (CJK Extension B+ coverage; installed automatically by `install.sh`)
 
 ## 安装
 
@@ -317,10 +321,10 @@ Avg position:     0.41
 ```
 custom-ime/
 ├── ranker/
-│   ├── config.py           # 路径配置、超参数
-│   ├── db.py               # SQLite 层：选择记录、词频/二元表
+│   ├── config.py           # 路径配置、超参数（发射权重 + Markov n-gram）
+│   ├── db.py               # SQLite 层：选择记录、词频/二元/三元表
 │   ├── local_ranker.py     # FTRL-Proximal 在线学习器（第二阶段）
-│   ├── model.py            # 第一阶段启发式评分 + 第二阶段 FTRL 融合
+│   ├── model.py            # 发射评分 + Markov n-gram 转移 + FTRL 融合
 │   ├── seed_data.py        # 8.2 万内置词库，用于冷启动
 │   ├── server.py           # Unix socket 服务器，处理 rank/select 请求
 │   ├── sync_phrases.py     # 将学习到的词组同步至 Rime 的 custom_phrase.txt
@@ -355,7 +359,7 @@ custom-ime/
 
 | 文件 | 内容 |
 |------|------|
-| `selections.db` | 选择日志、词频和二元词频表 |
+| `selections.db` | 选择日志、词频、二元和三元词频表 |
 | `ftrl_weights.json` | FTRL 模型权重序列化文件（第二阶段） |
 | `ranker.sock` | Unix Domain Socket（仅运行时） |
 
@@ -372,13 +376,15 @@ pytest -v
 
 | 参数 | 默认值 | 说明 |
 |-----------|---------|-------------|
-| `ALPHA` | `0.30` | 词频权重 |
-| `BETA` | `0.45` | 二元上下文权重 |
-| `GAMMA` | `0.25` | 时间衰减权重 |
+| `ALPHA` | `0.30` | 词频权重（发射分数） |
+| `GAMMA` | `0.25` | 时间衰减权重（发射分数） |
 | `DECAY` | `0.80` | 每天衰减系数 |
 | `SKIP_PENALTY` | `0.15` | 每次跳过惩罚（被忽略的候选词） |
 | `REJECT_PENALTY` | `0.60` | 显式拒绝惩罚（重打纠正） |
 | `LENGTH_BONUS` | `0.25` | 多字词二次方加成 |
+| `LAMBDA_INIT` | `0.50` | Markov n-gram 转移概率初始权重（FTRL 在线学习真正的 λ） |
+| `BACKOFF_K_MIN` | `3` | 低于此计数回退到低阶 n-gram |
+| `DISCOUNT` | `0.5` | Katz 平滑绝对折扣值 |
 
 ## 冒烟测试
 

@@ -1,12 +1,31 @@
 patch:
   # ── 外观 ──────────────────────────────────────────
+  preset_color_schemes:
+    solarized_dark:
+      name: 曬經・月／Solarized Dark
+      author: 雪齋 <lyc20041@gmail.com>
+      color_space: srgb
+      back_color: '0xF0352A0A'
+      hilited_back_color: '0xC9DADF'
+      hilited_candidate_back_color: '0x403516'
+      preedit_back_color: '0xD7E8ED'
+      border_color: '0x2A1F00'
+      text_color: '0x756E5D'
+      hilited_text_color: '0xBE706D'
+      candidate_text_color: '0x7389FF'
+      hilited_candidate_text_color: '0x989F52'
+      label_color: '0x478DF4'
+      hilited_candidate_label_color: '0xCC8947'
+      comment_text_color: '0xC38AFF'
+      hilited_comment_text_color: '0x289989'
   style:
-    # 配色方案: native(系统), aqua(碧水), luna(明月), dark_temple(暗堂)
-    color_scheme: aqua
-    # 字体: PingFangSC(苹方), Avenir, Helvetica, STHeiti(黑体)
-    font_face: "PingFangSC-Regular"
+    color_scheme: solarized_dark
+    # 字体: PingFang SC(苹方), HanaMinB(CJK Ext B+回退)
+    # HanaMinB 覆盖中日韩扩展B区及以后的生僻字(UTF-8 4字节区),
+    # 这是鼠须管内置 luna_pinyin 词库中存在的字符范围
+    font_face: "PingFang SC,HanaMinB"
     font_point: 16
-    label_font_face: "PingFangSC-Light"
+    label_font_face: "PingFang SC,HanaMinB"
     label_font_point: 12
     # 候选窗: 横向(horizontal) / 堆叠(stacked)
     candidate_list_layout: stacked

@@ -129,9 +129,10 @@ def run_scenario(name, test_pinyins, user_pref_fn, n_rounds=1500,
             p2_ranked = model_p2.rank(py, context, cand_words)
             p2_pos = p2_ranked.index(chosen)
             results_p2.append((p2_pos, len(cand_words)))
-        p1_for_update = {c: model_p2._score_phase1(c, context) for c in cand_words}
+        emissions = {c: model_p2._emission_score(c, py) for c in cand_words}
+        transitions = {c: model_p2._transition_score(c, context) for c in cand_words}
         model_p2._ftrl.update(chosen, context, cand_words, rime_pos,
-                              phase1_scores=p1_for_update, pinyin=py)
+                              emissions=emissions, markov_logps=transitions, pinyin=py)
         db_p2.record_selection(py, context, chosen, cand_words, rime_pos)
 
     db_p1.close()

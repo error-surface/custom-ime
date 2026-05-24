@@ -8,3 +8,5 @@ __pycache__/
 .worktrees/
 scripts/ranker_relay
 .DS_Store
+paper.zip
+paper/

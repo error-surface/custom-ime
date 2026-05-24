@@ -82,9 +82,10 @@ def evaluate():
                 phase2_active = idx + 1
 
         # Train FTRL on this selection (after prediction, no leakage)
-        p1_scores_for_update = {c: model._score_phase1(c, context) for c in candidates}
+        emissions = {c: model._emission_score(c, pinyin) for c in candidates}
+        transitions = {c: model._transition_score(c, context) for c in candidates}
         model._ftrl.update(chosen, context, candidates, original_pos,
-                           phase1_scores=p1_scores_for_update, pinyin=pinyin)
+                           emissions=emissions, markov_logps=transitions, pinyin=pinyin)
 
     # --- Results ---
     n = len(rime_positions)
